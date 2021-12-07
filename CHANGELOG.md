@@ -1,6 +1,16 @@
 ## Release Date: 2021-??-?? Valhalla 3.1.5
 * **Removed**
 * **Bug Fix**
+   * FIXED: Fix precision losses while encoding-decoding distance parameter in openlr [#3374](https://github.com/valhalla/valhalla/pull/3374)
+   * FIXED: Fix bearing calculation for openlr records [#3379](https://github.com/valhalla/valhalla/pull/3379)
+   * FIXED: Some refactoring that was proposed for the PR 3379 [3381](https://github.com/valhalla/valhalla/pull/3381)
+   * FIXED: Avoid calling out "keep left/right" when passing an exit [3349](https://github.com/valhalla/valhalla/pull/3349)
+   * FIXED: Fix iterator decrement beyond begin() in GeoPoint::HeadingAtEndOfPolyline() method [#3393](https://github.com/valhalla/valhalla/pull/3393)
+   * FIXED: Add string for Use:kPedestrianCrossing to fix null output in to_string(Use). [#3416](https://github.com/valhalla/valhalla/pull/3416)
+   * FIXED: Remove simple restrictions check for pedestrian cost calculation. [#3423](https://github.com/valhalla/valhalla/pull/3423)
+   * FIXED: Parse "highway=busway" OSM tag: https://wiki.openstreetmap.org/wiki/Tag:highway%3Dbusway [#3413](https://github.com/valhalla/valhalla/pull/3413)
+   * FIXED: workaround python's ArgumentParser bug to not accept negative numbers as arguments [#3443](https://github.com/valhalla/valhalla/pull/3443)
+
 * **Enhancement**
    * CHANGED: Pronunciation for names and destinations [#3132](https://github.com/valhalla/valhalla/pull/3132)
    * CHANGED: Requested code clean up for phonemes PR [#3356](https://github.com/valhalla/valhalla/pull/3356)
