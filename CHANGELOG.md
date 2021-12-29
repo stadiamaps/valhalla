@@ -2,6 +2,31 @@
 * **Removed**
 * **Bug Fix**
 * **Enhancement**
+   * CHANGED: Pronunciation for names and destinations [#3132](https://github.com/valhalla/valhalla/pull/3132)
+   * CHANGED: Requested code clean up for phonemes PR [#3356](https://github.com/valhalla/valhalla/pull/3356)
+   * CHANGED: Refactor Pronunciation class to struct [#3359](https://github.com/valhalla/valhalla/pull/3359)
+   * ADDED: Added support for probabale restrictions [#3361](https://github.com/valhalla/valhalla/pull/3361)
+   * CHANGED: Refactored the verbal text formatter to handle logic for street name and sign [#3369](https://github.com/valhalla/valhalla/pull/3369)
+   * CHANGED: return "version" and "tileset_age" on parameterless /status call [#3367](https://github.com/valhalla/valhalla/pull/3367)
+   * CHANGED: de-singleton tile_extract by introducing an optional index.bin file created by valhalla_build_extract [#3281](https://github.com/valhalla/valhalla/pull/3281)
+   * CHANGED: implement valhalla_build_elevation in python and add more --from-geojson & --from-graph options [#3318](https://github.com/valhalla/valhalla/pull/3318)
+   * ADDED: Add boolean parameter to clear memory for edge labels from thor. [#2789](https://github.com/valhalla/valhalla/pull/2789)
+   * CHANGED: Do not create statsd client in workers if it is not configured [#3394](https://github.com/valhalla/valhalla/pull/3394)
+   * ADDED: Import of Bike Share Stations information in BSS Connection edges [#3411](https://github.com/valhalla/valhalla/pull/3411)
+   * ADDED: Add heading to PathEdge to be able to return it on /locate [#3399](https://github.com/valhalla/valhalla/pull/3399)
+   * ADDED: Add `prioritize_bidirectional` option for fast work and correct ETA calculation for `depart_at` date_time type. Smoothly stop using live-traffic [#3398](https://github.com/valhalla/valhalla/pull/3398)
+   * CHANGED: Minor fix for headers  [#3436](https://github.com/valhalla/valhalla/pull/3436)
+   * CHANGED: Use std::multimap for polygons returned for admin and timezone queries. Improves performance when building tiles. [#3427](https://github.com/valhalla/valhalla/pull/3427)
+   * CHANGED: Refactored GraphBuilder::CreateSignInfoList [#3438](https://github.com/valhalla/valhalla/pull/3438)
+   * ADDED: Add support for LZ4 compressed elevation tiles [#3401](https://github.com/valhalla/valhalla/pull/3401)
+   * CHANGED: Rearranged some of the protobufs to remove redundancy [#3452](https://github.com/valhalla/valhalla/pull/3452)
+   * CHANGED: overhaul python bindings [#3380](https://github.com/valhalla/valhalla/pull/3380)
+   * CHANGED: Removed all protobuf defaults either by doing them in code or by relying on 0 initialization. Also deprecated best_paths and do_not_track [#3454](https://github.com/valhalla/valhalla/pull/3454)
+   * ADDED: isochrone action for /expansion endpoint to track dijkstra expansion [#3215](https://github.com/valhalla/valhalla/pull/3215)
+   * CHANGED: remove boost from dependencies and add conan as prep for #3346 [#3459](https://github.com/valhalla/valhalla/pull/3459)
+   * CHANGED: Remove boost.program_options in favor of cxxopts header-only lib and use conan to install header-only boost. [#3346](https://github.com/valhalla/valhalla/pull/3346)
+   * CHANGED: Moved all protos to proto3 for internal request/response handling [#3457)(https://github.com/valhalla/valhalla/pull/3457)
+   * CHANGED: Allow up to 32 outgoing link edges on a node when reclassifying links [#3483)(https://github.com/valhalla/valhalla/pull/3483)
 
 ## Release Date: 2021-10-07 Valhalla 3.1.4
 * **Removed**
