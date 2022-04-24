@@ -78,7 +78,13 @@ method.add_argument(
 parser.add_argument(
     "-c",
     "--config",
-    help="Absolute or relative path to the Valhalla config JSON.",
+    help="Absolute or relative path to the Valhalla config JSON. If present, the default tile download location will read from here.",
+    type=Path,
+)
+parser.add_argument(
+    "-o",
+    "--outdir",
+    help="Absolute or relative path to the directory where the tiles will be saved. Overrides config JSON.",
     type=Path,
 )
 parser.add_argument(
@@ -273,9 +279,6 @@ def download(tile: Tile, output_dir, compression: TileCompression):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    with open(args.config) as f:
-        config = json.load(f)
-    elevation_fp = Path(config["additional_data"]["elevation"] or "elevation")
 
     # set the right logger level
     if args.verbosity == 0:
@@ -284,6 +287,19 @@ if __name__ == "__main__":
         LOGGER.setLevel(logging.INFO)
     elif args.verbosity >= 2:
         LOGGER.setLevel(logging.DEBUG)
+
+    config = None
+    if args.config:
+        with open(args.config) as f:
+            config = json.load(f)
+
+    if args.outdir:
+        elevation_fp = args.outdir
+    elif config is not None:
+        elevation_fp = Path(config["additional_data"]["elevation"] or "elevation")
+    else:
+        LOGGER.critical("Either config or outdir is required.")
+        sys.exit(1)
 
     if args.from_geojson:
         tiles = get_tiles_with_geojson(args.from_geojson)
@@ -295,18 +311,18 @@ if __name__ == "__main__":
         LOGGER.critical("No download method specified.")
         sys.exit(1)
 
-    tile_format = TileCompression.GZIP
+    tile_compression = TileCompression.GZIP
     if args.decompress:
-        tile_format = TileCompression.UNCOMPRESSED
+        tile_compression = TileCompression.UNCOMPRESSED
     elif args.lz4:
-        tile_format = TileCompression.LZ4
+        tile_compression = TileCompression.LZ4
 
     LOGGER.debug(sorted(tiles, key=lambda x: x.name))
 
     # create the threadpool and download
     pool = ThreadPool(args.parallelism)
     results = pool.imap_unordered(
-        partial(download, output_dir=elevation_fp, tile_format=tile_format), tiles
+        partial(download, output_dir=elevation_fp, compression=tile_compression), tiles
     )
 
     sum_downloaded = list(filter(lambda res: res is True, results))
