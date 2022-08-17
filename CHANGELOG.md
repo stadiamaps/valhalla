@@ -1,5 +1,6 @@
 ## Release Date: 2021-??-?? Valhalla 3.1.5
 * **Removed**
+   * REMOVED: "build-*" docker image to decrease complexity [#3689](https://github.com/valhalla/valhalla/pull/3541)
 * **Bug Fix**
    * FIXED: Fix precision losses while encoding-decoding distance parameter in openlr [#3374](https://github.com/valhalla/valhalla/pull/3374)
    * FIXED: Fix bearing calculation for openlr records [#3379](https://github.com/valhalla/valhalla/pull/3379)
