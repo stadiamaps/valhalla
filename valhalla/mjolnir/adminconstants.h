@@ -124,7 +124,7 @@ const std::unordered_map<std::string, std::vector<int>>
                      (kAutoAccess | kTruckAccess | kBusAccess | kHOVAccess | kTaxiAccess |
                       kMotorcycleAccess),
                      -1, -1, -1, -1, (kBicycleAccess | kMopedAccess), -1, -1}},
-                   {"Turkey",
+                   {"Türkiye",
                     {-1, -1, -1, -1, -1, (kPedestrianAccess | kWheelchairAccess), -1, -1, -1}},
                    {"United Kingdom",
                     {-1, -1, -1, -1, -1, (kPedestrianAccess | kWheelchairAccess | kBicycleAccess),
