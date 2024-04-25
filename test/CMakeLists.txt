@@ -1,4 +1,5 @@
 add_subdirectory(${VALHALLA_SOURCE_DIR}/third_party/googletest ${CMAKE_BINARY_DIR}/googletest)
+
 set_target_properties(gtest PROPERTIES FOLDER "Dependencies")
 set_target_properties(gtest_main PROPERTIES FOLDER "Dependencies")
 set_target_properties(gmock PROPERTIES FOLDER "Dependencies")
@@ -16,11 +17,12 @@ add_library(valhalla_test
   )
 target_include_directories(valhalla_test PUBLIC
   ${VALHALLA_SOURCE_DIR}/test
-  ${VALHALLA_SOURCE_DIR}/test/gurka
-  ${VALHALLA_SOURCE_DIR}/third_party/protozero/include
-  ${VALHALLA_SOURCE_DIR}/third_party/just_gtfs/include
-  ${VALHALLA_SOURCE_DIR}/third_party/libosmium/include
+  ${VALHALLA_SOURCE_DIR}/test/gurka)
+target_include_directories(valhalla_test SYSTEM PUBLIC
   ${robinhoodhashing_include_dir}
+  ${VALHALLA_SOURCE_DIR}/third_party/just_gtfs/include
+  ${VALHALLA_SOURCE_DIR}/third_party/protozero/include
+  ${VALHALLA_SOURCE_DIR}/third_party/libosmium/include
   ${VALHALLA_SOURCE_DIR}/third_party/microtar/src)
 target_link_libraries(valhalla_test valhalla gtest gtest_main gmock pthread PkgConfig::LZ4)
 
@@ -69,20 +71,16 @@ endif()
 set(tests_with_warnings
   filesystem
   graphbuilder
-  graphparser
   graphtilebuilder
   gridded_data
   maneuversbuilder
   narrativebuilder
-  node_search
   parse_request
   sample
-  search
   sequence
   statsd
   traffictile
   util_odin
-  utrecht
   timedep_paths
   worker
   )
