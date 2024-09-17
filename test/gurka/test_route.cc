@@ -1162,7 +1162,7 @@ TEST(StandAlone, HGVNoAccessPenalty) {
     A-1--B----C----D----E--2-F----G----H--3-I
               |    |
               J----K
-              |    |             
+              |    |
               |    |
               L----M
            )";

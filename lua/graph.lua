@@ -454,7 +454,7 @@ motor_vehicle_node = {
 ["forestry"] = 0,
 ["destination"] = 1,
 ["customers"] = 1,
-["official"] = 0,
+["official"] = 1,
 ["public"] = 1,
 ["restricted"] = 1,
 ["allowed"] = 1,
@@ -1017,15 +1017,6 @@ function filter_tags_generic(kv)
     --check for golf cart forward overrides
     kv["golf_cart_forward"] = golf_cart[kv["golf_cart"]] or golf[kv["golf"]] or motor_vehicle[kv["motor_vehicle"]] or kv["golf_cart_forward"]
     kv["golf_cart_tag"] = golf_cart[kv["golf_cart"]] or golf[kv["golf"]] or motor_vehicle[kv["motor_vehicle"]] or nil
-
-    if kv["bike_tag"] == nil then
-      if kv["sac_scale"] == "hiking" then
-        kv["bike_forward"] = "true"
-        kv["bike_tag"] = "true"
-      elseif kv["sac_scale"] then
-        kv["bike_forward"] = "false"
-      end
-    end
 
     if kv["access"] == "psv" then
       kv["taxi_forward"] = "true"
