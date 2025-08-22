@@ -14,8 +14,6 @@
 #include "odin/narrative_builder_factory.h"
 #include "odin/narrativebuilder.h"
 #include "odin/util.h"
-#include "odin/narrative_builder_factory.h"
-#include "odin/narrativebuilder.h"
 #include "route_serializer_osrm.h"
 #include "route_summary_cache.h"
 #include "tyr/serializer_constants.h"
@@ -1320,6 +1318,55 @@ uint32_t calc_roundabout_turn_degrees(const valhalla::DirectionsLeg::Maneuver* p
   return roundabout_turn_degrees;
 }
 
+// The idea is that the instructions come a fixed amount of seconds before the maneuver takes place.
+// For whatever reasons, a distance in meters from the end of the maneuver needs to be provided
+// though. When different speeds are used on the road, they all need to be taken into account. This
+// function calculates the distance before the end of the maneuver by checking the elapsed_cost
+// seconds of each edges and accumulates their distances until the seconds threshold is passed. The
+// speed of this last edge is then used to subtract the distance so that the the seconds until the end
+// are exactly the provided amount of seconds.
+float distance_along_geometry(const valhalla::DirectionsLeg::Maneuver* prev_maneuver,
+                              valhalla::odin::EnhancedTripLeg* etp,
+                              const double distance,
+                              const uint32_t target_seconds) {
+  uint32_t node_index = prev_maneuver->end_path_index();
+  double end_node_elapsed_seconds = etp->node(node_index).cost().elapsed_cost().seconds();
+  double begin_node_elapsed_seconds =
+      etp->node(prev_maneuver->begin_path_index()).cost().elapsed_cost().seconds();
+
+  // If the maneuver is too short, simply return its distance.
+  if (end_node_elapsed_seconds - begin_node_elapsed_seconds < target_seconds) {
+    return distance;
+  }
+
+  float accumulated_distance_km = 0;
+  float previous_accumulated_distance_km = 0;
+  double accumulated_seconds = 0;
+  double previous_accumulated_seconds = 0;
+  // Find the node after which the instructions should be heard:
+  while (accumulated_seconds < target_seconds && node_index >= prev_maneuver->begin_path_index()) {
+    node_index -= 1;
+    // not really accumulating seconds ourselves, but it happens elsewhere:
+    previous_accumulated_seconds = accumulated_seconds;
+    accumulated_seconds =
+        end_node_elapsed_seconds - etp->node(node_index).cost().elapsed_cost().seconds();
+    previous_accumulated_distance_km = accumulated_distance_km;
+    accumulated_distance_km += etp->GetCurrEdge(node_index)->length_km();
+  }
+  // The node_index now indicates the node AFTER which the target_seconds will be reached
+  // we now have to subtract the surplus distance (based on seconds) of this edge from the
+  // accumulated_distance_km
+  auto surplus_percentage =
+      (accumulated_seconds - target_seconds) / (accumulated_seconds - previous_accumulated_seconds);
+  accumulated_distance_km -=
+      (accumulated_distance_km - previous_accumulated_distance_km) * surplus_percentage;
+  if (accumulated_distance_km * 1000 > distance) {
+    return distance;
+  } else {
+    return accumulated_distance_km * 1000; // in meters
+  }
+}
+
 // Populate the bannerInstructions within a step.
 // bannerInstructions are a unified object of maneuvers name, dest, ref and intersection.lanes
 json::ArrayPtr banner_instructions(const std::string& name,
@@ -1355,9 +1402,6 @@ json::ArrayPtr banner_instructions(const std::string& name,
     primary_text = ref_;
     ref_ = std::string("");
   }
-  if (arrive_maneuver || primary_text.empty()) {
-    primary_text = maneuver.text_instruction();
-  }
 
   bool roundabout = maneuver.type() == DirectionsLeg_Maneuver_Type_kRoundaboutEnter ||
                     maneuver.type() == DirectionsLeg_Maneuver_Type_kRoundaboutExit;
@@ -1366,6 +1410,47 @@ json::ArrayPtr banner_instructions(const std::string& name,
   // If it goes straight through, it's 180 degrees, if it's a quarter circle is 90 degrees, etc.
   uint32_t roundabout_turn_degrees =
       roundabout ? calc_roundabout_turn_degrees(prev_maneuver, maneuver, etp) : 0;
+
+  // For arrival, we actually want to take a different path.
+  // If we announce too early, we'll tell the user they arrived when they are REALLY far from the
+  // destination.
+  if (arrive_maneuver) {
+    float arrival_announcement_distance =
+        distance_along_geometry(prev_maneuver, etp, distance,
+                                SECONDS_BEFORE_VERBAL_PRE_TRANSITION_INSTRUCTION);
+
+    if (distance > arrival_announcement_distance) {
+      // Initial banner: "You will arrive at..."
+      banner_instruction_main->emplace("distanceAlongGeometry", json::fixed_t{distance, 3});
+      banner_instruction_main
+          ->emplace("primary",
+                    primary_banner_instruction(maneuver.verbal_transition_alert_instruction(), ref_,
+                                               exit, arrive_maneuver, maneuver_type, modifier,
+                                               roundabout, roundabout_turn_degrees, drive_side));
+      banner_instructions_array->emplace_back(std::move(banner_instruction_main));
+    }
+
+    // Arrival banner: "You have arrived at..."
+    banner_instruction_main = json::map({});
+    banner_instruction_main->emplace("distanceAlongGeometry",
+                                     json::fixed_t{std::min(static_cast<double>(
+                                                                arrival_announcement_distance),
+                                                            distance),
+                                                   3});
+    banner_instruction_main->emplace("primary",
+                                     primary_banner_instruction(maneuver.text_instruction(), ref_,
+                                                                exit, arrive_maneuver, maneuver_type,
+                                                                modifier, roundabout,
+                                                                roundabout_turn_degrees, drive_side));
+    banner_instructions_array->emplace_back(std::move(banner_instruction_main));
+
+    return banner_instructions_array;
+  }
+
+  if (primary_text.empty()) {
+    // If we don't have any primary text, use the text from the maneuver
+    primary_text = maneuver.text_instruction();
+  }
 
   // distanceAlongGeometry is the distance along the current step from where on this
   // banner should be visible. The first banner starts at the beginning.
@@ -1431,55 +1516,6 @@ void maneuver_geometry(json::MapPtr& step,
   } else {
     int precision = options.shape_format() == polyline6 ? 1e6 : 1e5;
     step->emplace("geometry", midgard::encode(maneuver_shape, precision));
-  }
-}
-
-// The idea is that the instructions come a fixed amount of seconds before the maneuver takes place.
-// For whatever reasons, a distance in meters from the end of the maneuver needs to be provided
-// though. When different speeds are used on the road, they all need to be taken into account. This
-// function calculates the distance before the end of the maneuver by checking the elapsed_cost
-// seconds of each edges and accumulates their distances until the seconds threshold is passed. The
-// speed of this last edge is then used to subtract the distance so that the the seconds until the end
-// are exactly the provided amount of seconds.
-float distance_along_geometry(const valhalla::DirectionsLeg::Maneuver* prev_maneuver,
-                              valhalla::odin::EnhancedTripLeg* etp,
-                              const double distance,
-                              const uint32_t target_seconds) {
-  uint32_t node_index = prev_maneuver->end_path_index();
-  double end_node_elapsed_seconds = etp->node(node_index).cost().elapsed_cost().seconds();
-  double begin_node_elapsed_seconds =
-      etp->node(prev_maneuver->begin_path_index()).cost().elapsed_cost().seconds();
-
-  // If the maneuver is too short, simply return its distance.
-  if (end_node_elapsed_seconds - begin_node_elapsed_seconds < target_seconds) {
-    return distance;
-  }
-
-  float accumulated_distance_km = 0;
-  float previous_accumulated_distance_km = 0;
-  double accumulated_seconds = 0;
-  double previous_accumulated_seconds = 0;
-  // Find the node after which the instructions should be heard:
-  while (accumulated_seconds < target_seconds && node_index >= prev_maneuver->begin_path_index()) {
-    node_index -= 1;
-    // not really accumulating seconds ourselves, but it happens elsewhere:
-    previous_accumulated_seconds = accumulated_seconds;
-    accumulated_seconds =
-        end_node_elapsed_seconds - etp->node(node_index).cost().elapsed_cost().seconds();
-    previous_accumulated_distance_km = accumulated_distance_km;
-    accumulated_distance_km += etp->GetCurrEdge(node_index)->length_km();
-  }
-  // The node_index now indicates the node AFTER which the target_seconds will be reached
-  // we now have to subtract the surplus distance (based on seconds) of this edge from the
-  // accumulated_distance_km
-  auto surplus_percentage =
-      (accumulated_seconds - target_seconds) / (accumulated_seconds - previous_accumulated_seconds);
-  accumulated_distance_km -=
-      (accumulated_distance_km - previous_accumulated_distance_km) * surplus_percentage;
-  if (accumulated_distance_km * 1000 > distance) {
-    return distance;
-  } else {
-    return accumulated_distance_km * 1000; // in meters
   }
 }
 
