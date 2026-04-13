@@ -794,7 +794,8 @@ void AddTripIntersectingEdge(const AttributesController& controller,
                              const NodeInfo* nodeinfo,
                              TripLeg_Node* trip_node,
                              const DirectedEdge* intersecting_de,
-                             bool blind_instructions) {
+                             bool blind_instructions,
+                             uint32_t drive_access_mask) {
   TripLeg_IntersectingEdge* intersecting_edge = trip_node->add_intersecting_edge();
 
   // Set the heading for the intersecting edge if requested
@@ -832,10 +833,23 @@ void AddTripIntersectingEdge(const AttributesController& controller,
     intersecting_edge->set_cyclability(GetTripLegTraversability(traversability));
   }
 
-  // Set the driveability flag for the intersecting edge if requested
+  // Set the driveability flag for the intersecting edge if requested.
+  // Computed dynamically from edge access using the costing's access mask,
+  // matching the pattern used for walkability/cyclability above. This ensures
+  // vehicle types with their own access bits (e.g., kGolfCartAccess) get
+  // correct driveability rather than using the precomputed local_driveability
+  // which only reflects kAutoAccess.
   if (controller(kNodeIntersectingEdgeDriveability)) {
-    intersecting_edge->set_driveability(
-        GetTripLegTraversability(nodeinfo->local_driveability(local_edge_index)));
+    if (intersecting_de->forwardaccess() & drive_access_mask) {
+      traversability = (intersecting_de->reverseaccess() & drive_access_mask)
+                           ? Traversability::kBoth
+                           : Traversability::kForward;
+    } else {
+      traversability = (intersecting_de->reverseaccess() & drive_access_mask)
+                           ? Traversability::kBackward
+                           : Traversability::kNone;
+    }
+    intersecting_edge->set_driveability(GetTripLegTraversability(traversability));
   }
 
   // Set the previous/intersecting edge name consistency if requested
@@ -929,7 +943,8 @@ void AddIntersectingEdges(const AttributesController& controller,
                           uint32_t prior_opp_local_index,
                           GraphReader& graphreader,
                           valhalla::TripLeg::Node* trip_node,
-                          const bool blind_instructions) {
+                          const bool blind_instructions,
+                          uint32_t drive_access_mask) {
   /* Add connected edges from the start node. Do this after the first trip
      edge is added
 
@@ -973,7 +988,7 @@ void AddIntersectingEdges(const AttributesController& controller,
     // Add intersecting edges on the same hierarchy level and not on the path
     AddTripIntersectingEdge(controller, start_tile, directededge, prev_de,
                             intersecting_edge->localedgeidx(), node, trip_node, intersecting_edge,
-                            blind_instructions);
+                            blind_instructions, drive_access_mask);
   }
 
   // Add intersecting edges on different levels (follow NodeTransitions)
@@ -999,7 +1014,7 @@ void AddIntersectingEdges(const AttributesController& controller,
 
         AddTripIntersectingEdge(controller, endtile, directededge, prev_de,
                                 intersecting_edge2->localedgeidx(), nodeinfo2, trip_node,
-                                intersecting_edge2, blind_instructions);
+                                intersecting_edge2, blind_instructions, drive_access_mask);
       }
     }
   }
@@ -2092,7 +2107,8 @@ void TripLegBuilder::Build(
       AddIntersectingEdges(controller, start_tile, node, directededge, prev_de, prior_opp_local_index,
                            graphreader, trip_node,
                            travel_type == PedestrianType::kBlind &&
-                               mode == sif::TravelMode::kPedestrian);
+                               mode == sif::TravelMode::kPedestrian,
+                           costing->access_mode());
     }
 
     ////////////// Prepare for the next iteration
