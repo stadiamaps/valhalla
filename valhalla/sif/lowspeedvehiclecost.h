@@ -31,5 +31,4 @@ cost_ptr_t CreateLowSpeedVehicleCost(const Costing& costing);
 } // namespace sif
 } // namespace valhalla
 
-
 #endif // VALHALLA_LOWSPEEDVEHICLECOST_H

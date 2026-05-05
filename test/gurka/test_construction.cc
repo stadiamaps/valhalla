@@ -154,8 +154,10 @@ TEST_P(ConstructionRoutingTest, CheckAvoidRoadsUnderConstruction) {
   gurka::assert::raw::expect_path(result, {"AB", "BE", "EF", "FC", "CD"});
 }
 
-const std::vector<std::string> costing_types = {"auto",       "taxi",       "bus",
-                                                "truck",      "bicycle",    "motor_scooter",
-                                                "motorcycle", "pedestrian", "hov", "low_speed_vehicle"};
+const std::vector<std::string> costing_types = {"auto",       "taxi",
+                                                "bus",        "truck",
+                                                "bicycle",    "motor_scooter",
+                                                "motorcycle", "pedestrian",
+                                                "hov",        "low_speed_vehicle"};
 
 INSTANTIATE_TEST_SUITE_P(Test, ConstructionRoutingTest, ::testing::ValuesIn(costing_types));

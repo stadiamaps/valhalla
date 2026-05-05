@@ -2,7 +2,7 @@
 #include <boost/format.hpp>
 #include <boost/geometry.hpp>
 #include <boost/geometry/geometries/register/point.hpp>
-#include <boost/geometry/multi/geometries/register/multi_polygon.hpp>
+#include <boost/geometry/geometries/register/multi_polygon.hpp>
 #include <gtest/gtest.h>
 #include <valhalla/proto/options.pb.h>
 

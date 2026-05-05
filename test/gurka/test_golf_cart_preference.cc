@@ -23,42 +23,48 @@ protected:
               |           |
               G-----------H
     )";
-    const gurka::ways ways = {{"AB",
-                               {{"highway", "secondary"}
-                               }},
+    const gurka::ways ways = {{"AB", {{"highway", "secondary"}}},
                               {"BC",
-                               {{"highway", "secondary"},
+                               {
+                                   {"highway", "secondary"},
                                }},
 
                               // N/S cross streets between secondary and res
                               {"BD",
-                               {{"highway", "tertiary"},
+                               {
+                                   {"highway", "tertiary"},
                                }},
                               {"CF",
-                               {{"highway", "tertiary"},
+                               {
+                                   {"highway", "tertiary"},
                                }},
 
                               // Middle residential road
                               {"DE",
-                               {{"highway", "residential"},
+                               {
+                                   {"highway", "residential"},
                                }},
                               {"EF",
-                               {{"highway", "residential"},
-                               {"golf_cart", "destination"},
+                               {
+                                   {"highway", "residential"},
+                                   {"golf_cart", "destination"},
                                }},
 
                               // Cart paths (tagged with several variations)
                               {"EG",
-                               {{"highway", "path"},
+                               {
+                                   {"highway", "path"},
                                    {"surface", "paved"},
                                }},
                               {"GH",
-                               {{"highway", "path"},
+                               {
+                                   {"highway", "path"},
                                    {"surface", "paved"},
                                    {"golf_cart", "designated"},
                                }},
                               {"FH",
-                               {{"highway", "path"},
+                               {
+                                   {"highway", "path"},
                                    {"golf", "cartpath"},
                                }}};
 
@@ -74,7 +80,8 @@ gurka::map GolfCartPreference::map = {};
 TEST_F(GolfCartPreference, CheckGolfCartPreference) {
   std::unordered_map<std::string, std::string> options = {
       {"/costing_options/low_speed_vehicle/vehicle_type", "golf_cart"}};
-  auto result = gurka::do_action(valhalla::Options::route, map, {"A", "C"}, "low_speed_vehicle", options);
+  auto result =
+      gurka::do_action(valhalla::Options::route, map, {"A", "C"}, "low_speed_vehicle", options);
   gurka::assert::osrm::expect_steps(result, {"AB", "BD", "DE", "EG", "GH", "FH"});
   gurka::assert::raw::expect_path(result, {"AB", "BD", "DE", "EG", "GH", "FH", "CF"});
 }

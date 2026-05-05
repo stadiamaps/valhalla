@@ -11,9 +11,9 @@ using namespace valhalla;
 const std::unordered_map<std::string, std::string> build_config{
     {"mjolnir.admin", {VALHALLA_SOURCE_DIR "test/data/netherlands_admin.sqlite"}}};
 
-const std::vector<std::string>& costing = {"auto",    "taxi",          "bus",        "truck",
-                                           "bicycle", "motor_scooter", "motorcycle", "pedestrian",
-                                           "low_speed_vehicle"};
+const std::vector<std::string>& costing = {"auto",       "taxi",       "bus",
+                                           "truck",      "bicycle",    "motor_scooter",
+                                           "motorcycle", "pedestrian", "low_speed_vehicle"};
 
 TEST(Standalone, AccessPsvWay) {
   constexpr double gridsize_metres = 10;
@@ -495,7 +495,6 @@ TEST_F(MtbAccess, CheckMtbAccess) {
 
 void validate_path(const valhalla::Api& result, const std::vector<std::string>& expected_names) {
   ASSERT_EQ(result.trip().routes(0).legs_size(), 1);
-  auto leg = result.trip().routes(0).legs(0);
   gurka::assert::raw::expect_path(result, expected_names);
 }
 
@@ -518,7 +517,8 @@ TEST(Standalone, NodeAccess) {
       {"KL", {{"highway", "residential"}}},
   };
 
-  const gurka::nodes nodes = {{"F", {{"motor_vehicle", "no"}}}, {"G", {{"motorcar", "no"}, {"golf_cart", "no"}}}};
+  const gurka::nodes nodes = {{"F", {{"motor_vehicle", "no"}}},
+                              {"G", {{"motorcar", "no"}, {"golf_cart", "no"}}}};
 
   const auto layout = gurka::detail::map_to_coordinates(ascii_map, 100);
   auto map = gurka::buildtiles(layout, ways, nodes, {}, "test/data/gurka_node_access");

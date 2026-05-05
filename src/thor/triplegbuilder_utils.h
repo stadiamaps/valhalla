@@ -76,7 +76,7 @@ private:
       // TODO: import more BSS data, can be used to display capacity in real time
       auto tag_range = taggedValue.equal_range(baldr::TaggedValue::kBssInfo);
       if (tag_range.first != tag_range.second) {
-        bss_station_info->ParseFromString(tag_range.first->second);
+        (void)bss_station_info->ParseFromString(tag_range.first->second);
       }
       bss_station_info->set_rent_cost(pedestrian_costing->BSSCost().secs);
       bss_station_info->set_return_cost(bicycle_costing->BSSCost().secs);

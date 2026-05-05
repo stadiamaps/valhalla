@@ -129,7 +129,7 @@ TEST(Standalone, AdminCrossingsCountry) {
                         {{"mjolnir.admin", {VALHALLA_SOURCE_DIR "test/data/language_admin.sqlite"}}});
   std::string result_json;
   rapidjson::Document result;
-  auto api = gurka::do_action(valhalla::Options::route, map, {"A", "G"}, "auto",
+  gurka::do_action(valhalla::Options::route, map, {"A", "G"}, "auto",
                               {{"/admin_crossings", "1"}}, {}, &result_json);
   result.Parse(result_json.c_str());
 
@@ -178,7 +178,7 @@ TEST(Standalone, AdminCrossingsState) {
                         {{"mjolnir.admin", {VALHALLA_SOURCE_DIR "test/data/language_admin.sqlite"}}});
   std::string result_json;
   rapidjson::Document result;
-  auto api = gurka::do_action(valhalla::Options::route, map, {"A", "G"}, "auto",
+  gurka::do_action(valhalla::Options::route, map, {"A", "G"}, "auto",
                               {{"/admin_crossings", "1"}}, {}, &result_json);
   result.Parse(result_json.c_str());
 
@@ -232,7 +232,7 @@ TEST(Standalone, AdminCrossingsMultiple) {
                         {{"mjolnir.admin", {VALHALLA_SOURCE_DIR "test/data/language_admin.sqlite"}}});
   std::string result_json;
   rapidjson::Document result;
-  auto api = gurka::do_action(valhalla::Options::route, map, {"A", "G"}, "auto",
+  gurka::do_action(valhalla::Options::route, map, {"A", "G"}, "auto",
                               {{"/admin_crossings", "1"}}, {}, &result_json);
   result.Parse(result_json.c_str());
 
@@ -302,7 +302,7 @@ TEST(Standalone, AdminCrossingsNone) {
                         {{"mjolnir.admin", {VALHALLA_SOURCE_DIR "test/data/language_admin.sqlite"}}});
   std::string result_json;
   rapidjson::Document result;
-  auto api = gurka::do_action(valhalla::Options::route, map, {"A", "G"}, "auto",
+  gurka::do_action(valhalla::Options::route, map, {"A", "G"}, "auto",
                               {{"/admin_crossings", "1"}}, {}, &result_json);
   result.Parse(result_json.c_str());
 
@@ -341,7 +341,7 @@ TEST(Standalone, AdminCrossingsEnter) {
                         {{"mjolnir.admin", {VALHALLA_SOURCE_DIR "test/data/language_admin.sqlite"}}});
   std::string result_json;
   rapidjson::Document result;
-  auto api = gurka::do_action(valhalla::Options::route, map, {"A", "G"}, "auto",
+  gurka::do_action(valhalla::Options::route, map, {"A", "G"}, "auto",
                               {{"/admin_crossings", "1"}}, {}, &result_json);
   result.Parse(result_json.c_str());
 
@@ -461,7 +461,7 @@ TEST(Standalone, AdminAlongEdge) {
   std::string result_json;
   rapidjson::Document api_result;
 
-  auto api = gurka::do_action(valhalla::Options::route, map, {"G", "H"}, "auto",
+  gurka::do_action(valhalla::Options::route, map, {"G", "H"}, "auto",
                               {{"/admin_crossings", "1"}}, {}, &result_json);
   api_result.Parse(result_json.c_str());
 

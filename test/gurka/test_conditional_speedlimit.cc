@@ -247,9 +247,8 @@ TEST_F(ConditionalSpeedlimit, RouteApiProto) {
 TEST_F(ConditionalSpeedlimit, LocateApiJson) {
   auto reader = test::make_clean_graphreader(map.config.get_child("mjolnir"));
   std::string json;
-  const auto result =
-      gurka::do_action(valhalla::Options::locate, map, {"1", "2", "3", "4", "5", "6", "7"}, "auto",
-                       {}, reader, &json);
+  gurka::do_action(valhalla::Options::locate, map, {"1", "2", "3", "4", "5", "6", "7"}, "auto", {},
+                   reader, &json);
 
   rapidjson::Document root;
   root.Parse(json);

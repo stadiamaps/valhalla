@@ -2005,7 +2005,7 @@ public:
       }
 
       std::string buffer;
-      bss_info.SerializeToString(&buffer);
+      (void)bss_info.SerializeToString(&buffer);
       n.set_bss_info_index(osmdata_.node_names.index(buffer));
       ++osmdata_.node_name_count;
 
