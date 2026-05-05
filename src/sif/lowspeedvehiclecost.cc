@@ -7,6 +7,7 @@
 #include "proto_conversions.h"
 #include "sif/costconstants.h"
 #include "sif/osrm_car_duration.h"
+#include <algorithm>
 #include <cassert>
 
 using namespace valhalla::midgard;
@@ -550,8 +551,17 @@ void ParseLowSpeedVehicleCostOptions(const rapidjson::Document& doc,
 
   ParseBaseCostOptions(json, c, kBaseCostOptsConfig);
   JSON_PBF_RANGED_DEFAULT(co, kTopSpeedRange, json, "/top_speed", top_speed);
-  JSON_PBF_RANGED_DEFAULT(co, kMaxAllowedSpeedLimit, json, "/max_allowed_speed_limit",
-                          max_allowed_speed_limit);
+  // Read max_allowed_speed_limit and clamp to the allowed range.
+  // We cannot use JSON_PBF_RANGED_DEFAULT here
+  // because ranged_default_t snaps out-of-range values back to the default (kDefaultAllowedSpeedLimit),
+  // which is surprising behavior to say the least.
+  const auto raw_max_allowed_speed_limit = rapidjson::get<uint32_t>(
+      json, "/max_allowed_speed_limit",
+      co->has_max_allowed_speed_limit_case() ? co->max_allowed_speed_limit()
+                                             : kMaxAllowedSpeedLimit.def);
+  co->set_max_allowed_speed_limit(std::clamp(raw_max_allowed_speed_limit,
+                                             kMaxAllowedSpeedLimit.min,
+                                             kMaxAllowedSpeedLimit.max));
   JSON_PBF_DEFAULT(co, kDefaultVehicleType, json, "/vehicle_type", transport_type);
 }
 

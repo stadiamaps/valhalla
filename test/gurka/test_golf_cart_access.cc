@@ -161,6 +161,25 @@ TEST_F(GolfCartAccess, CheckGolfCartAccessReducedSpeedLimit) {
   }
 }
 
+// Out-of-range max_allowed_speed_limit values should clamp to the bounds, not
+// silently revert to the default. Prior bug: a value above kMaximumAllowedSpeedLimit
+// (80 kph) would snap back to kDefaultAllowedSpeedLimit (57 kph) — the most restrictive
+// value — making the override do the opposite of what callers expect.
+//
+// OQ is tagged maxspeed=40mph (≈64 kph). With the default 57 kph cap it is rejected
+// and the router takes the long way around via OP-PR-QR. With max_allowed_speed_limit=200
+// clamped to 80 kph, OQ becomes accessible (64 < 80) and the router takes the OQ shortcut.
+TEST_F(GolfCartAccess, OutOfRangeMaxAllowedSpeedLimitClampsRatherThanDefaulting) {
+  std::unordered_map<std::string, std::string> options = {
+      {"/costing_options/low_speed_vehicle/max_allowed_speed_limit", "200"},
+      {"/costing_options/low_speed_vehicle/vehicle_type", "golf_cart"}};
+  auto result =
+      gurka::do_action(valhalla::Options::route, map, {"A", "U"}, "low_speed_vehicle", options);
+  gurka::assert::raw::expect_path(result,
+                                  {"AB", "BC", "CD", "DE", "EF", "FG", "GK", "KL", "HL", "HI", "IJ",
+                                   "JN", "MN", "MO", "OQ", "QT", "TV", "UV"});
+}
+
 TEST(Standalone, HighwayCrossing) {
   constexpr double gridsize = 500;
 
