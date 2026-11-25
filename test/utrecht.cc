@@ -1,16 +1,12 @@
-#include <filesystem>
-
 #include "midgard/sequence.h"
-#include "mjolnir/osmnode.h"
+#include "mjolnir/osmway.h"
 #include "mjolnir/pbfgraphparser.h"
-#include <cstdint>
 
 #include <boost/property_tree/ptree.hpp>
+#include <gtest/gtest.h>
 
-#include "baldr/directededge.h"
-#include "baldr/graphconstants.h"
-
-#include "test.h"
+#include <cstdint>
+#include <filesystem>
 
 #if !defined(VALHALLA_SOURCE_DIR)
 #define VALHALLA_SOURCE_DIR
@@ -45,7 +41,7 @@ TEST(Utrecth, TestBike) {
   conf.put<unsigned long>("mjolnir.id_table_size", 1000);
 
   sequence<OSMWay> ways(ways_file, false);
-  ways.sort(way_predicate);
+  ways.sort(way_predicate, 2);
 
   auto way_127361688 = GetWay(127361688, ways);
   EXPECT_TRUE(way_127361688.auto_forward());
@@ -184,7 +180,7 @@ TEST(Utrecht, TestBus) {
   conf.put<unsigned long>("mjolnir.id_table_size", 1000);
 
   sequence<OSMWay> ways(ways_file, false);
-  ways.sort(way_predicate);
+  ways.sort(way_predicate, 2);
 
   auto way_33648196 = GetWay(33648196, ways);
   EXPECT_TRUE(way_33648196.auto_forward());

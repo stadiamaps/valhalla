@@ -1,11 +1,11 @@
 #include "mjolnir/util.h"
-
+#include "baldr/graphtile.h"
+#include "baldr/graphtileptr.h"
+#include "baldr/nodeinfo.h"
+#include "baldr/rapidjson_utils.h"
 #include "baldr/tilehierarchy.h"
-#include "filesystem.h"
-#include "midgard/aabb2.h"
 #include "midgard/logging.h"
-#include "midgard/point2.h"
-#include "midgard/polyline2.h"
+#include "mjolnir/areabuilder.h"
 #include "mjolnir/bssbuilder.h"
 #include "mjolnir/elevationbuilder.h"
 #include "mjolnir/graphbuilder.h"
@@ -13,57 +13,420 @@
 #include "mjolnir/graphfilter.h"
 #include "mjolnir/graphvalidator.h"
 #include "mjolnir/hierarchybuilder.h"
-#include "mjolnir/osmpbfparser.h"
 #include "mjolnir/pbfgraphparser.h"
 #include "mjolnir/restrictionbuilder.h"
 #include "mjolnir/shortcutbuilder.h"
 #include "mjolnir/transitbuilder.h"
+#include "scoped_timer.h"
 
-#include <boost/algorithm/string/classification.hpp>
+#include <boost/algorithm/string/constants.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/property_tree/ptree.hpp>
-#include <regex>
+#include <cpp-statsd-client/StatsdClient.hpp>
 
+#include <filesystem>
+#include <format>
+
+using boost::property_tree::ptree;
+using namespace valhalla::baldr;
 using namespace valhalla::midgard;
+using namespace valhalla::mjolnir;
 
 namespace {
-
-struct spatialite_singleton_t {
-  static const spatialite_singleton_t& get_instance() {
-    static spatialite_singleton_t s;
-    return s;
-  }
-
-private:
-  spatialite_singleton_t() {
-    spatialite_initialize();
-  }
-  ~spatialite_singleton_t() {
-    spatialite_shutdown();
-  }
-};
 
 // Temporary files used during tile building
 const std::string ways_file = "ways.bin";
 const std::string way_nodes_file = "way_nodes.bin";
+const std::string edge_shapes_file = "edge_shapes.bin";
+const std::string edge_node_ids_file = "edge_node_ids.bin";
 const std::string nodes_file = "nodes.bin";
 const std::string edges_file = "edges.bin";
 const std::string tile_manifest_file = "tile_manifest.json";
 const std::string access_file = "access.bin";
-const std::string pronunciation_file = "pronunciation.bin";
 const std::string bss_nodes_file = "bss_nodes.bin";
 const std::string linguistic_node_file = "linguistics_node.bin";
 const std::string cr_from_file = "complex_from_restrictions.bin";
 const std::string cr_to_file = "complex_to_restrictions.bin";
 const std::string new_to_old_file = "new_nodes_to_old_nodes.bin";
 const std::string old_to_new_file = "old_nodes_to_new_nodes.bin";
-const std::string intersections_file = "intersections.bin";
-const std::string shapes_file = "shapes.bin";
+
+// read a tile's header, let the callback mutate it, write it back
+template <typename Fn> void update_tile_header(const std::filesystem::path& p, const Fn& mutate) {
+  std::fstream file(p, std::ios::in | std::ios::out | std::ios::binary);
+  if (!file.is_open()) {
+    throw std::runtime_error("Failed to open file " + p.string());
+  }
+  GraphTileHeader header;
+  file.read(reinterpret_cast<char*>(&header), sizeof(GraphTileHeader));
+  mutate(header);
+  file.seekp(0);
+  file.write(reinterpret_cast<const char*>(&header), sizeof(GraphTileHeader));
+  if (!file) {
+    throw std::runtime_error("Failed to write to file " + p.string());
+  }
+}
+
+// run a callback for every .gph tile under tile_dir
+template <typename Fn> void for_each_tile(const std::string& tile_dir, const Fn& fn) {
+  for (std::filesystem::recursive_directory_iterator it(tile_dir), end; it != end; ++it) {
+    if (it->is_regular_file() && it->path().extension() == ".gph") {
+      fn(it->path());
+    }
+  }
+}
+
+/**
+ * Returns true if edge transition is a pencil point u-turn, false otherwise.
+ * A pencil point intersection happens when a doubly-digitized road transitions
+ * to a singly-digitized road - which looks like a pencil point - for example:
+ *        -----\____
+ *        -----/
+ *
+ * @param  from_index  Index of the 'from' directed edge.
+ * @param  to_index  Index of the 'to' directed edge.
+ * @param  directededge  Directed edge builder.
+ * @param  edges  Directed edges outbound from a node.
+ * @param  node_info  Node info builder used for name consistency.
+ * @param  turn_degree  The turn degree between the 'from' and 'to' edge.
+ *
+ * @return true if edge transition is a pencil point u-turn, false otherwise.
+ */
+bool IsPencilPointUturn(uint32_t from_index,
+                        uint32_t to_index,
+                        const DirectedEdge& directededge,
+                        const DirectedEdge* edges,
+                        const NodeInfo& node_info,
+                        uint32_t turn_degree) {
+  // Logic for drive on right
+  if (node_info.drive_on_right()) {
+    // If the turn is a sharp left (179 < turn < 211)
+    //    or short distance (< 50m) and wider sharp left (179 < turn < 226)
+    // and oneway edgesb
+    // and an intersecting right road exists
+    // and no intersecting left road exists
+    // and the from and to edges have a common base name
+    // then it is a left pencil point u-turn
+    if ((((turn_degree > 179) && (turn_degree < 211)) ||
+         (((edges[from_index].length() < 50) || (directededge.length() < 50)) &&
+          (turn_degree > 179) && (turn_degree < 226))) &&
+        (!(edges[from_index].forwardaccess() & kAutoAccess) &&
+         (edges[from_index].reverseaccess() & kAutoAccess)) &&
+        ((directededge.forwardaccess() & kAutoAccess) &&
+         !(directededge.reverseaccess() & kAutoAccess)) &&
+        directededge.edge_to_right(from_index) && !directededge.edge_to_left(from_index) &&
+        edges[to_index].name_consistency(from_index)) {
+      return true;
+    }
+
+  }
+  // Logic for drive on left
+  else {
+    // If the turn is a sharp right (149 < turn < 181)
+    //    or short distance (< 50m) and wider sharp right (134 < turn < 181)
+    // and oneway edges
+    // and no intersecting right road exists
+    // and an intersecting left road exists
+    // and the from and to edges have a common base name
+    // then it is a right pencil point u-turn
+    if ((((turn_degree > 149) && (turn_degree < 181)) ||
+         (((edges[from_index].length() < 50) || (directededge.length() < 50)) &&
+          (turn_degree > 134) && (turn_degree < 181))) &&
+        (!(edges[from_index].forwardaccess() & kAutoAccess) &&
+         (edges[from_index].reverseaccess() & kAutoAccess)) &&
+        ((directededge.forwardaccess() & kAutoAccess) &&
+         !(directededge.reverseaccess() & kAutoAccess)) &&
+        !directededge.edge_to_right(from_index) && directededge.edge_to_left(from_index) &&
+        edges[to_index].name_consistency(from_index)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Returns true if edge transition is a cycleway u-turn, false otherwise.
+ *
+ * @param  from_index  Index of the 'from' directed edge.
+ * @param  to_index  Index of the 'to' directed edge.
+ * @param  directededge  Directed edge builder.
+ * @param  edges  Directed edges outbound from a node.
+ * @param  node_info  Node info builder used for name consistency.
+ * @param  turn_degree  The turn degree between the 'from' and 'to' edge.
+ *
+ * @return true if edge transition is a cycleway u-turn, false otherwise.
+ */
+bool IsCyclewayUturn(uint32_t from_index,
+                     uint32_t to_index,
+                     const DirectedEdge& directededge,
+                     const DirectedEdge* edges,
+                     const NodeInfo& node_info,
+                     uint32_t turn_degree) {
+
+  // we only deal with Cycleways
+  if (edges[from_index].use() != Use::kCycleway || edges[to_index].use() != Use::kCycleway) {
+    return false;
+  }
+
+  // Logic for drive on right
+  if (node_info.drive_on_right()) {
+    // If the turn is a sharp left (179 < turn < 211)
+    //    or short distance (< 50m) and wider sharp left (179 < turn < 226)
+    // and an intersecting right road exists
+    // and an intersecting left road exists
+    // then it is a cycleway u-turn
+    if ((((turn_degree > 179) && (turn_degree < 211)) ||
+         (((edges[from_index].length() < 50) || (directededge.length() < 50)) &&
+          (turn_degree > 179) && (turn_degree < 226))) &&
+        directededge.edge_to_right(from_index) && directededge.edge_to_left(from_index)) {
+      return true;
+    }
+  }
+  // Logic for drive on left
+  else {
+    // If the turn is a sharp right (149 < turn < 181)
+    //    or short distance (< 50m) and wider sharp right (134 < turn < 181)
+    // and an intersecting right road exists
+    // and an intersecting left road exists
+    // then it is a right cyclewayt u-turn
+    if ((((turn_degree > 149) && (turn_degree < 181)) ||
+         (((edges[from_index].length() < 50) || (directededge.length() < 50)) &&
+          (turn_degree > 134) && (turn_degree < 181))) &&
+        directededge.edge_to_right(from_index) && directededge.edge_to_left(from_index)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Gets the stop likelihoood / impact at an intersection when transitioning
+ * from one edge to another. This depends on the difference between the
+ * classifications/importance of the from and to edge and the highest
+ * classification of the remaining edges at the intersection. Low impact
+ * values occur when the from and to roads are higher class roads than other
+ * roads. There is less likelihood of having to stop in these cases (or stops
+ * will usually be shorter duration). Where traffic lights are (or might be)
+ * present it is more likely that a favorable "green" is present in the
+ * direction of the higher classification. If classifications are all equal
+ * the stop impact will depend on the classification. All directions are
+ * likely to stop and duration is likely longer with higher classification
+ * roads (e.g. a 4 way stop of tertiary roads is likely to be shorter than
+ * a 4 way stop (with traffic light) at an intersection of 4 primary roads.
+ * Higher stop impacts occur when the from and to edges are lower class
+ * than the others. There is almost certainly a stop (stop sign, traffic
+ * light) and longer waits are likely when a low class road crosses
+ * a higher class road. Special cases occur for links (ramps/turn channels)
+ * and parking aisles.
+ * @param  from  Index of the from directed edge.
+ * @param  to    Index of the to directed edge.
+ * @param  directededge   Directed edge builder - set values.
+ * @param  edges Directed edges outbound from a node.
+ * @param  count Number of outbound directed edges to consider.
+ * @param  node_info  Node info builder used for name consistency.
+ * @param  turn_degree  The turn degree between the 'from' and 'to' edge.
+ *
+ * @return  Returns stop impact ranging from 0 (no likely impact) to
+ *          7 - large impact.
+ */
+uint32_t GetStopImpact(uint32_t from,
+                       uint32_t to,
+                       const DirectedEdge& directededge,
+                       const DirectedEdge* edges,
+                       const uint32_t count,
+                       const NodeInfo& nodeinfo,
+                       uint32_t turn_degree,
+                       enhancer_stats& stats) {
+
+  ///////////////////////////////////////////////////////////////////////////
+  // Special cases.
+
+  // Handle Roundabouts
+  if (edges[from].roundabout() && edges[to].roundabout()) {
+    return 0;
+  }
+
+  // Handle Pencil point u-turn
+  if (IsPencilPointUturn(from, to, directededge, edges, nodeinfo, turn_degree)) {
+    stats.pencilucount++;
+    return 7;
+  }
+
+  // Handle Cycleway u-turn
+  if (IsCyclewayUturn(from, to, directededge, edges, nodeinfo, turn_degree)) {
+    return 7;
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+
+  // Get the highest classification of other roads at the intersection
+  bool all_ramps = true;
+  bool found_other_edge = false;
+  const DirectedEdge* edge = &edges[0];
+  // kUnclassified,  kResidential, and kServiceOther are grouped
+  // together for the stop_impact logic.
+  RoadClass bestrc = RoadClass::kUnclassified;
+  for (uint32_t i = 0; i < count; i++, edge++) {
+    // Check the road if it is drivable TO the intersection and is neither
+    // the "to" nor "from" edge. Treat roundabout edges as two levels lower
+    // classification (higher value) to reduce the stop impact.
+    if (i != to && i != from && (edge->reverseaccess() & kAutoAccess)) {
+      if (edge->roundabout()) {
+        uint32_t c = static_cast<uint32_t>(edge->classification()) + 2;
+        if (c < static_cast<uint32_t>(bestrc)) {
+          bestrc = static_cast<RoadClass>(c);
+        }
+      } else if (edge->classification() < bestrc) {
+        bestrc = edge->classification();
+      }
+    }
+
+    // Track whether any other drivable edge exists at this node (in either direction).
+    // This detects real intersections even on one-way streets where the cross-street
+    // only has forward access from this node.
+    if (i != to && i != from && ((edge->reverseaccess() | edge->forwardaccess()) & kAutoAccess)) {
+      found_other_edge = true;
+    }
+
+    // Check if not a ramp or turn channel
+    if (!edge->link()) {
+      all_ramps = false;
+    }
+  }
+
+  // No other drivable edges means this is not a real intersection (for example the way id has
+  // changed so we need a new edge, but we're still on the same road with no other interfering
+  // traffic). Return 0 so we don't add phantom transition costs.
+  // Don't apply this to U-turns (from == to), as dead-end U-turns should retain their cost.
+  if (!found_other_edge && from != to) {
+    return 0;
+  }
+
+  // kUnclassified,  kResidential, and kServiceOther are grouped
+  // together for the stop_impact logic.
+  RoadClass from_rc = edges[from].classification();
+  if (from_rc > RoadClass::kUnclassified) {
+    from_rc = RoadClass::kUnclassified;
+  }
+
+  // High stop impact from a turn channel onto a turn channel unless
+  // the other edge a low class road (walkways often intersect
+  // turn channels)
+  if (edges[from].use() == Use::kTurnChannel && edges[to].use() == Use::kTurnChannel &&
+      bestrc < RoadClass::kUnclassified) {
+    return 7;
+  }
+
+  // Set stop impact to the difference in road class (make it non-negative)
+  int impact = static_cast<int>(from_rc) - static_cast<int>(bestrc);
+  uint32_t stop_impact = (impact < -3) ? 0 : impact + 3;
+
+  // TODO: possibly increase stop impact at large intersections (more edges)
+  // or if several are high class
+  // Reduce stop impact from a turn channel or when only links
+  // (ramps and turn channels) are involved. Exception - sharp turns.
+  Turn::Type turn_type = Turn::GetType(turn_degree);
+  bool is_sharp = (turn_type == Turn::Type::kSharpLeft || turn_type == Turn::Type::kSharpRight ||
+                   turn_type == Turn::Type::kReverse);
+  bool is_slight = (turn_type == Turn::Type::kStraight || turn_type == Turn::Type::kSlightRight ||
+                    turn_type == Turn::Type::kSlightLeft);
+  if (all_ramps) {
+    if (is_sharp) {
+      stop_impact += 2;
+    } else if (is_slight) {
+      stop_impact /= 2;
+    } else if (stop_impact != 0) { // make sure we do not subtract 1 from 0
+      stop_impact -= 1;
+    }
+  } else if (edges[from].use() == Use::kRamp && edges[to].use() == Use::kRamp &&
+             bestrc < RoadClass::kUnclassified) {
+    // Ramp may be crossing a road (not a path or service road)
+    if (nodeinfo.traffic_signal() || edges[from].traffic_signal() || edges[from].stop_sign()) {
+      stop_impact = 4;
+    } else if (count > 3) {
+      stop_impact += 2;
+    }
+  } else if (edges[from].use() == Use::kRamp && edges[to].use() != Use::kRamp &&
+             !edges[from].internal() && !edges[to].internal()) {
+    // Increase stop impact on merge
+    if (is_sharp) {
+      stop_impact += 3;
+    } else if (is_slight) {
+      stop_impact += 1;
+    } else {
+      stop_impact += 2;
+    }
+
+  } else if (edges[from].use() == Use::kTurnChannel) {
+    // Penalize sharp turns
+    if (is_sharp) {
+      stop_impact += 2;
+    } else if (edges[to].use() == Use::kRamp) {
+      stop_impact += 1;
+    } else if (is_slight) {
+      stop_impact /= 2;
+    } else if (stop_impact != 0) { // make sure we do not subtract 1 from 0
+      stop_impact -= 1;
+    }
+  } else if (edges[from].use() == Use::kParkingAisle && edges[to].use() == Use::kParkingAisle) {
+    // decrease stop impact inside parking lots
+    if (stop_impact != 0)
+      stop_impact -= 1;
+  }
+  // add to the stop impact when transitioning from higher to lower class road and we are not on a TC
+  // or ramp penalize lefts when driving on the right.
+  else if (nodeinfo.drive_on_right() &&
+           (turn_type == Turn::Type::kSharpLeft || turn_type == Turn::Type::kLeft) &&
+           from_rc != edges[to].classification() && edges[to].use() != Use::kRamp &&
+           edges[to].use() != Use::kTurnChannel) {
+    if (nodeinfo.traffic_signal() || edges[from].traffic_signal() || edges[from].stop_sign()) {
+      stop_impact += 2;
+    } else if (abs(static_cast<int>(from_rc) - static_cast<int>(edges[to].classification())) > 1)
+      stop_impact++;
+    // penalize rights when driving on the left.
+  } else if (!nodeinfo.drive_on_right() &&
+             (turn_type == Turn::Type::kSharpRight || turn_type == Turn::Type::kRight) &&
+             from_rc != edges[to].classification() && edges[to].use() != Use::kRamp &&
+             edges[to].use() != Use::kTurnChannel) {
+    if (nodeinfo.traffic_signal() || edges[from].traffic_signal() || edges[from].stop_sign()) {
+      stop_impact += 2;
+    } else if (abs(static_cast<int>(from_rc) - static_cast<int>(edges[to].classification())) > 1)
+      stop_impact++;
+  }
+  // Clamp to kMaxStopImpact
+  return (stop_impact <= kMaxStopImpact) ? stop_impact : kMaxStopImpact;
+}
 
 } // namespace
 
 namespace valhalla {
 namespace mjolnir {
+
+uint16_t compute_tileset_build_id(const std::string& tile_dir) {
+  // sum the per-tile data hashes already stored in each header's low bits, no re-hashing needed.
+  // addition is order independent, so the build id doesn't depend on the walk
+  uint64_t build_id_acc = 0;
+  for_each_tile(tile_dir, [&](const std::filesystem::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    GraphTileHeader header;
+    in.read(reinterpret_cast<char*>(&header), sizeof(GraphTileHeader));
+    build_id_acc += header.tile_checksum();
+  });
+
+  // fold to 16 bits (enough for URL based deployments)
+  return build_id_acc ^ (build_id_acc >> 16) ^ (build_id_acc >> 32) ^ (build_id_acc >> 48);
+}
+
+void set_tileset_build_id(const std::string& tile_dir) {
+  // stamp the computed build id into every tile's high bits
+  const uint64_t build_id_bits = static_cast<uint64_t>(compute_tileset_build_id(tile_dir))
+                                 << kTileHashBits;
+  for_each_tile(tile_dir, [&](const std::filesystem::path& p) {
+    update_tile_header(p, [&](GraphTileHeader& h) {
+      h.set_raw_checksum(h.tile_checksum() | build_id_bits);
+    });
+  });
+}
 
 /**
  * Splits a tag into a vector of strings.  Delim defaults to ;
@@ -79,10 +442,20 @@ std::vector<std::string> GetTagTokens(const std::string& tag_value, char delim) 
 }
 
 std::vector<std::string> GetTagTokens(const std::string& tag_value, const std::string& delim_str) {
-  std::regex regex_str(delim_str);
-  std::vector<std::string> tokens(std::sregex_token_iterator(tag_value.begin(), tag_value.end(),
-                                                             regex_str, -1),
-                                  std::sregex_token_iterator());
+  std::vector<std::string> tokens;
+  if (delim_str.empty()) {
+    tokens.emplace_back(tag_value);
+    return tokens;
+  }
+  size_t start = 0, pos;
+  while ((pos = tag_value.find(delim_str, start)) != std::string::npos) {
+    tokens.emplace_back(tag_value, start, pos - start);
+    start = pos + delim_str.size();
+  }
+  // an empty token after the last delimiter is not emitted
+  if (start < tag_value.size()) {
+    tokens.emplace_back(tag_value, start);
+  }
   return tokens;
 }
 
@@ -110,7 +483,7 @@ std::string remove_double_quotes(const std::string& s) {
  * @return value between 0 and 15 representing the average curviness of the input shape. lower
  *         values indicate less curvy shapes and higher values indicate curvier shapes
  */
-uint32_t compute_curvature(const std::list<PointLL>& shape) {
+uint32_t compute_curvature(const std::vector<PointLL>& shape) {
   // Edges with just 2 shape points have no curvature.
   // TODO - perhaps a post-process to "average" curvature along adjacent edges
   // and smooth curvature on connected edges may be desirable?
@@ -208,35 +581,71 @@ uint32_t GetOpposingEdgeIndex(const graph_tile_ptr& endnodetile,
   return baldr::kMaxEdgesPerNode;
 }
 
-std::shared_ptr<void> make_spatialite_cache(sqlite3* handle) {
-  if (!handle) {
-    return nullptr;
+/**
+ * Process edge transitions from all other incoming edges onto the
+ * specified outbound directed edge.
+ */
+void ProcessEdgeTransitions(const uint32_t idx,
+                            baldr::DirectedEdge& directededge,
+                            const baldr::DirectedEdge* edges,
+                            const uint32_t ntrans,
+                            const baldr::NodeInfo& nodeinfo,
+                            enhancer_stats& stats) {
+  for (uint32_t i = 0; i < ntrans; i++) {
+    // Get the turn type (reverse the heading of the from directed edge since
+    // it is incoming
+    uint32_t from_heading = ((nodeinfo.heading(i) + 180) % 360);
+    uint32_t turn_degree = GetTurnDegree(from_heading, nodeinfo.heading(idx));
+    directededge.set_turntype(i, baldr::Turn::GetType(turn_degree));
+
+    // Set the edge_to_left and edge_to_right flags
+    uint32_t right_count = 0;
+    uint32_t left_count = 0;
+    if (ntrans > 2) {
+      for (uint32_t j = 0; j < ntrans; ++j) {
+        // Skip the from and to edges; also skip roads under construction
+        if (j == i || j == idx || edges[j].use() == baldr::Use::kConstruction) {
+          continue;
+        }
+
+        // Get the turn degree from incoming edge i to j and check if right
+        // or left of the turn degree from incoming edge i onto idx
+        uint32_t degree = GetTurnDegree(from_heading, nodeinfo.heading(j));
+        if (turn_degree > 180) {
+          if (degree > turn_degree || degree < 180) {
+            ++right_count;
+          } else if (degree < turn_degree && degree > 180) {
+            ++left_count;
+          }
+        } else {
+          if (degree > turn_degree && degree < 180) {
+            ++right_count;
+          } else if (degree < turn_degree || degree > 180) {
+            ++left_count;
+          }
+        }
+      }
+    }
+    directededge.set_edge_to_left(i, (left_count > 0));
+    directededge.set_edge_to_right(i, (right_count > 0));
+
+    // Get stop impact
+    // NOTE: stop impact uses the right and left edges so this logic must
+    // come after the right/left edge logic
+    uint32_t stopimpact =
+        GetStopImpact(i, idx, directededge, edges, ntrans, nodeinfo, turn_degree, stats);
+    directededge.set_stopimpact(i, stopimpact);
   }
-
-  spatialite_singleton_t::get_instance();
-  void* conn = spatialite_alloc_connection();
-  spatialite_init_ex(handle, conn, 0);
-
-  // Sadly, `spatialite_cleanup_ex` calls `xmlCleanupParser()` (via `free_internal_cache()`) which is
-  // not thread-safe and may cause a crash on double-free if called from multiple threads.
-  // This static mutex works around the issue until the spatialite library is fixed:
-  // - https://www.gaia-gis.it/fossil/libspatialite/tktview/855ef62a68b9ac6e500b54883707b2876c390c01
-  // For full "double free" issue details follow https://github.com/valhalla/valhalla/issues/4904
-  static std::mutex spatialite_mutex;
-  return std::shared_ptr<void>(conn, [](void* c) {
-    std::lock_guard<std::mutex> lock(spatialite_mutex);
-    spatialite_cleanup_ex(c);
-  });
 }
 
 bool build_tile_set(const boost::property_tree::ptree& original_config,
                     const std::vector<std::string>& input_files,
                     const BuildStage start_stage,
-                    const BuildStage end_stage,
-                    const bool release_osmpbf_memory) {
+                    const BuildStage end_stage) {
+  SCOPED_TIMER();
   auto remove_temp_file = [](const std::string& fname) {
-    if (filesystem::exists(fname)) {
-      filesystem::remove(fname);
+    if (std::filesystem::exists(fname)) {
+      std::filesystem::remove(fname);
     }
   };
 
@@ -253,8 +662,8 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
 
   // Get the tile directory (make sure it ends with the preferred separator
   std::string tile_dir = config.get<std::string>("mjolnir.tile_dir");
-  if (tile_dir.back() != filesystem::path::preferred_separator) {
-    tile_dir.push_back(filesystem::path::preferred_separator);
+  if (tile_dir.back() != std::filesystem::path::preferred_separator) {
+    tile_dir.push_back(std::filesystem::path::preferred_separator);
   }
 
   // During the initialize stage the tile directory will be purged (if it already exists)
@@ -263,27 +672,34 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
     // set up the directories and purge old tiles if starting at the parsing stage
     for (const auto& level : valhalla::baldr::TileHierarchy::levels()) {
       auto level_dir = tile_dir + std::to_string(level.level);
-      if (filesystem::exists(level_dir) && !filesystem::is_empty(level_dir)) {
+      if (std::filesystem::exists(level_dir) && !std::filesystem::is_empty(level_dir)) {
         LOG_WARN("Non-empty " + level_dir + " will be purged of tiles");
-        filesystem::remove_all(level_dir);
+        std::filesystem::remove_all(level_dir);
       }
     }
 
     // check for transit level.
     auto level_dir =
         tile_dir + std::to_string(valhalla::baldr::TileHierarchy::GetTransitLevel().level);
-    if (filesystem::exists(level_dir) && !filesystem::is_empty(level_dir)) {
+    if (std::filesystem::exists(level_dir) && !std::filesystem::is_empty(level_dir)) {
       LOG_WARN("Non-empty " + level_dir + " will be purged of tiles");
-      filesystem::remove_all(level_dir);
+      std::filesystem::remove_all(level_dir);
     }
 
     // Create the directory if it does not exist
-    filesystem::create_directories(tile_dir);
+    std::filesystem::create_directories(tile_dir);
   }
+
+  // Snapshot for per-stage delta reporting
+  auto log_stage = [&config](BuildStage stage) { build_stats::get().log_stage(stage, config); };
+  // nothing to report, but logic only works correctly if every stage is logged
+  log_stage(BuildStage::kInitialize);
 
   // Set up the temporary (*.bin) files used during processing
   std::string ways_bin = tile_dir + ways_file;
   std::string way_nodes_bin = tile_dir + way_nodes_file;
+  std::string edge_shapes_bin = tile_dir + edge_shapes_file;
+  std::string edge_node_ids_bin = tile_dir + edge_node_ids_file;
   std::string nodes_bin = tile_dir + nodes_file;
   std::string edges_bin = tile_dir + edges_file;
   std::string tile_manifest = tile_dir + tile_manifest_file;
@@ -304,15 +720,11 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
     osm_data = PBFGraphParser::ParseWays(config.get_child("mjolnir"), input_files, ways_bin,
                                          way_nodes_bin, access_bin);
 
-    // Free all protobuf memory - cannot use the protobuffer lib after this!
-    if (release_osmpbf_memory && BuildStage::kParseWays == end_stage) {
-      OSMPBF::Parser::free();
-    }
-
     // Write the OSMData to files if the end stage is less than enhancing
     if (end_stage <= BuildStage::kEnhance) {
       osm_data.write_to_temp_files(tile_dir);
     }
+    log_stage(BuildStage::kParseWays);
   }
 
   // Parse OSM data
@@ -323,15 +735,27 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
     PBFGraphParser::ParseRelations(config.get_child("mjolnir"), input_files, cr_from_bin, cr_to_bin,
                                    osm_data);
 
-    // Free all protobuf memory - cannot use the protobuffer lib after this!
-    if (release_osmpbf_memory && BuildStage::kParseRelations == end_stage) {
-      OSMPBF::Parser::free();
-    }
-
     // Write the OSMData to files if the end stage is less than enhancing
     if (end_stage <= BuildStage::kEnhance) {
       osm_data.write_to_temp_files(tile_dir);
     }
+    log_stage(BuildStage::kParseRelations);
+  }
+
+  // Second pass over the ways to collect the geometry of ways that
+  // are members of pedestrian area relations
+  if (start_stage <= BuildStage::kParseAreaWays && BuildStage::kParseAreaWays <= end_stage) {
+    if (config.get<bool>("mjolnir.pedestrian_areas", false) &&
+        config.get<bool>("mjolnir.include_pedestrian", true)) {
+      PBFGraphParser::ParseAreaWays(config.get_child("mjolnir"), input_files, ways_bin, way_nodes_bin,
+                                    osm_data);
+
+      // Write the OSMData to files if the end stage is less than enhancing
+      if (end_stage <= BuildStage::kEnhance) {
+        osm_data.write_to_temp_files(tile_dir);
+      }
+    }
+    log_stage(BuildStage::kParseAreaWays);
   }
 
   // Parse OSM data
@@ -341,15 +765,25 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
     PBFGraphParser::ParseNodes(config.get_child("mjolnir"), input_files, way_nodes_bin, bss_nodes_bin,
                                linguistic_node_bin, osm_data);
 
-    // Free all protobuf memory - cannot use the protobuffer lib after this!
-    if (release_osmpbf_memory) {
-      OSMPBF::Parser::free();
-    }
-
     // Write the OSMData to files if the end stage is less than enhancing
     if (end_stage <= BuildStage::kEnhance) {
       osm_data.write_to_temp_files(tile_dir);
     }
+    log_stage(BuildStage::kParseNodes);
+  }
+
+  // Builds pedestrian areas
+  if (start_stage <= BuildStage::kBuildAreas && BuildStage::kBuildAreas <= end_stage) {
+    if (config.get<bool>("mjolnir.pedestrian_areas", false) &&
+        config.get<bool>("mjolnir.include_pedestrian", true)) {
+      AreaBuilder::BuildAreas(config.get_child("mjolnir"), ways_bin, way_nodes_bin, osm_data);
+
+      // Write the OSMData to files if the end stage is less than enhancing
+      if (end_stage <= BuildStage::kEnhance) {
+        osm_data.write_to_temp_files(tile_dir);
+      }
+    }
+    log_stage(BuildStage::kBuildAreas);
   }
 
   // Construct edges
@@ -364,6 +798,7 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
     // Output manifest
     TileManifest manifest{tiles};
     manifest.LogToFile(tile_manifest);
+    log_stage(BuildStage::kConstructEdges);
   }
 
   // Build Valhalla routing tiles
@@ -371,7 +806,7 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
     if (start_stage == BuildStage::kBuild) {
       // Read OSMData from files if building tiles is the first stage
       osm_data.read_from_temp_files(tile_dir);
-      if (filesystem::exists(tile_manifest)) {
+      if (std::filesystem::exists(tile_manifest)) {
         tiles = TileManifest::ReadFromFile(tile_manifest).tileset;
       } else {
         // TODO: Remove this backfill in the future, and make calling constructedges stage
@@ -382,8 +817,10 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
     }
 
     // Build the graph using the OSMNodes and OSMWays from the parser
-    GraphBuilder::Build(config, osm_data, ways_bin, way_nodes_bin, nodes_bin, edges_bin, cr_from_bin,
-                        cr_to_bin, linguistic_node_bin, tiles);
+    GraphBuilder::Build(config, osm_data, ways_bin, way_nodes_bin, nodes_bin, edges_bin,
+                        edge_shapes_bin, edge_node_ids_bin, cr_from_bin, cr_to_bin,
+                        linguistic_node_bin, tiles);
+    log_stage(BuildStage::kBuild);
   }
 
   // Enhance the local level of the graph. This adds information to the local
@@ -395,16 +832,19 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
       osm_data.read_from_unique_names_file(tile_dir);
     }
     GraphEnhancer::Enhance(config, osm_data, access_bin);
+    log_stage(BuildStage::kEnhance);
   }
 
   // Perform optional edge filtering (remove edges and nodes for specific access modes)
   if (start_stage <= BuildStage::kFilter && BuildStage::kFilter <= end_stage) {
     GraphFilter::Filter(config);
+    log_stage(BuildStage::kFilter);
   }
 
   // Add transit
   if (start_stage <= BuildStage::kTransit && BuildStage::kTransit <= end_stage) {
     TransitBuilder::Build(config);
+    log_stage(BuildStage::kTransit);
   }
 
   // Build bike share stations
@@ -413,6 +853,7 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
       osm_data.read_from_unique_names_file(tile_dir);
     }
     BssBuilder::Build(config, osm_data, bss_nodes_bin);
+    log_stage(BuildStage::kBss);
   }
 
   // Builds additional hierarchies if specified within config file. Connections
@@ -421,6 +862,7 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
   if (build_hierarchy) {
     if (start_stage <= BuildStage::kHierarchy && BuildStage::kHierarchy <= end_stage) {
       HierarchyBuilder::Build(config, new_to_old_bin, old_to_new_bin);
+      log_stage(BuildStage::kHierarchy);
     }
 
     // Build shortcuts if specified in the config file. Shortcuts can only be
@@ -429,6 +871,7 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
     if (build_shortcuts) {
       if (start_stage <= BuildStage::kShortcuts && BuildStage::kShortcuts <= end_stage) {
         ShortcutBuilder::Build(config);
+        log_stage(BuildStage::kShortcuts);
       }
     } else {
       LOG_INFO("Skipping shortcut builder");
@@ -440,6 +883,7 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
   // Add elevation to the tiles
   if (start_stage <= BuildStage::kElevation && BuildStage::kElevation <= end_stage) {
     ElevationBuilder::Build(config);
+    log_stage(BuildStage::kElevation);
   }
 
   // Build the Complex Restrictions
@@ -448,11 +892,14 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
   // within the tile. However, there is no serialization currently available for complex restrictions.
   if (start_stage <= BuildStage::kRestrictions && BuildStage::kRestrictions <= end_stage) {
     RestrictionBuilder::Build(config, cr_from_bin, cr_to_bin);
+    log_stage(BuildStage::kRestrictions);
   }
 
   // Validate the graph and add information that cannot be added until full graph is formed.
   if (start_stage <= BuildStage::kValidate && BuildStage::kValidate <= end_stage) {
     GraphValidator::Validate(config);
+    log_stage(BuildStage::kValidate);
+    set_tileset_build_id(tile_dir);
   }
 
   // Cleanup bin files
@@ -460,6 +907,8 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
     LOG_INFO("Cleaning up temporary *.bin files within " + tile_dir);
     remove_temp_file(ways_bin);
     remove_temp_file(way_nodes_bin);
+    remove_temp_file(edge_shapes_bin);
+    remove_temp_file(edge_node_ids_bin);
     remove_temp_file(nodes_bin);
     remove_temp_file(edges_bin);
     remove_temp_file(access_bin);
@@ -471,8 +920,93 @@ bool build_tile_set(const boost::property_tree::ptree& original_config,
     remove_temp_file(old_to_new_bin);
     remove_temp_file(tile_manifest);
     OSMData::cleanup_temp_files(tile_dir);
+    log_stage(BuildStage::kCleanup);
   }
   return true;
+}
+
+std::string TileManifest::ToString() const {
+  rapidjson::writer_wrapper_t writer(4096);
+  writer.start_object();
+  writer.start_array("tiles");
+  for (const auto& tile : tileset) {
+    writer.start_object();
+    writer.start_object("graphid");
+    tile.first.json(writer);
+    writer.end_object();
+    writer("node_index", static_cast<uint64_t>(tile.second));
+    writer.end_object();
+  }
+  writer.end_array();
+  writer.end_object();
+  return writer.get_buffer();
+}
+
+void TileManifest::LogToFile(const std::string& filename) const {
+  std::ofstream handle;
+  handle.open(filename);
+  handle << ToString();
+  handle.close();
+  LOG_INFO("Writing tile manifest to " + filename);
+}
+
+TileManifest TileManifest::ReadFromFile(const std::string& filename) {
+  ptree manifest;
+  rapidjson::read_json(filename, manifest);
+  LOG_INFO("Reading tile manifest from " + filename);
+  std::map<baldr::GraphId, size_t> tileset;
+  for (const auto& tile_info : manifest.get_child("tiles")) {
+    const ptree& graph_id = tile_info.second.get_child("graphid");
+    const baldr::GraphId id(graph_id.get<uint64_t>("value"));
+    const size_t node_index = tile_info.second.get<size_t>("node_index");
+    tileset.insert({id, node_index});
+  }
+  LOG_INFO("Reading " + std::to_string(tileset.size()) + " tiles from tile manifest file " +
+           filename);
+  return TileManifest{tileset};
+}
+
+void build_stats::record_timing(const std::string& key, uint64_t seconds) {
+  std::lock_guard<std::mutex> lock(timings_mutex_);
+  pending_timings_.emplace_back(key, seconds);
+}
+
+void build_stats::log_stage(BuildStage stage, const boost::property_tree::ptree& config) const {
+  auto stage_name = to_string(stage);
+  std::vector<std::pair<std::string, uint32_t>> statsd_entries;
+  for (uint8_t i = 0; i < kCount; ++i) {
+    if (stage == meta[i].stage) {
+      uint32_t current = counters_[i].load();
+      statsd_entries.emplace_back(std::string("mjolnir.") + meta[i].statsd_key, current);
+      if (current > 0 && meta[i].is_warning) {
+        LOG_WARN(std::format("[{}] {} {}", stage_name, current, meta[i].log_label));
+      }
+    }
+  }
+
+  auto host = config.get<std::string>("statsd.host", "");
+  if (host.empty()) {
+    return;
+  }
+  Statsd::StatsdClient client(host, config.get<int>("statsd.port", 8125),
+                              config.get<std::string>("statsd.prefix", ""),
+                              config.get<uint64_t>("statsd.batch_size", 500), 0);
+  std::vector<std::string> tags;
+  auto added_tags = config.get_child_optional("statsd.tags");
+  if (added_tags) {
+    for (const auto& tag : *added_tags) {
+      tags.push_back(tag.second.data());
+    }
+  }
+  for (const auto& [key, count] : statsd_entries) {
+    client.gauge(key, count, 1.f, tags);
+  }
+  for (const auto& [key, seconds] : pending_timings_) {
+    client.gauge(key, seconds, 1.f, tags);
+  }
+  pending_timings_.clear();
+  client.gauge("mjolnir.stage", static_cast<int>(stage), 1.f, tags);
+  client.flush();
 }
 
 } // namespace mjolnir

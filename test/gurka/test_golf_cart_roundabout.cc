@@ -136,4 +136,3 @@ TEST_F(GolfCartRoundabout, GolfCart3rdExit) {
       "Enter the roundabout and take the 3rd exit onto Cart Path North.",
       "Enter the roundabout and take the 3rd exit onto Cart Path North.", "");
 }
-

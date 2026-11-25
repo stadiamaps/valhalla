@@ -1,10 +1,6 @@
 #ifndef VALHALLA_SIF_COSTFACTORY_H_
 #define VALHALLA_SIF_COSTFACTORY_H_
 
-#include <functional>
-#include <map>
-
-#include <valhalla/baldr/rapidjson_utils.h>
 #include <valhalla/proto/options.pb.h>
 #include <valhalla/proto_conversions.h>
 #include <valhalla/sif/autocost.h>
@@ -17,6 +13,9 @@
 #include <valhalla/sif/pedestriancost.h>
 #include <valhalla/sif/transitcost.h>
 #include <valhalla/sif/truckcost.h>
+
+#include <functional>
+#include <map>
 
 namespace valhalla {
 namespace sif {
@@ -32,6 +31,9 @@ public:
    * Constructor
    */
   CostFactory() {
+    /*
+     * Costings that are composites are registered with NoCost/dummy cost
+     */
     Register(Costing::auto_, CreateAutoCost);
     // auto_data_fix was deprecated
     // auto_shorter was deprecated
@@ -45,7 +47,8 @@ public:
     Register(Costing::transit, CreateTransitCost);
     Register(Costing::multimodal, CreateNoCost); // dummy so it behaves like the rest
     Register(Costing::none_, CreateNoCost);
-    Register(Costing::bikeshare, CreateBikeShareCost);
+    Register(Costing::bikeshare, CreateNoCost);       // dummy
+    Register(Costing::auto_pedestrian, CreateNoCost); // dummy
     Register(Costing::low_speed_vehicle, CreateLowSpeedVehicleCost);
   }
 
@@ -55,9 +58,9 @@ public:
    * @param costing    the cost type that the function creates
    * @param function   the function pointer to call to actually create the cost object
    */
-  void Register(const Costing::Type costing, factory_function_t function) {
+  void Register(const Costing::Type costing, factory_function_t&& function) {
     factory_funcs_.erase(costing);
-    factory_funcs_.emplace(costing, function);
+    factory_funcs_.emplace(costing, std::move(function));
   }
 
   /**
@@ -113,6 +116,13 @@ public:
         options.costing_type() == Costing::bikeshare) {
       // For multi-modal we set the initial mode to pedestrian. (TODO - allow other initial modes)
       mode = valhalla::sif::TravelMode::kPedestrian;
+
+      // special flag to signal pedestrian cost that correlating locations to BSS connection edges is
+      // fine
+      mode_costing[static_cast<size_t>(mode)]->set_project_on_bss_connection(options.costing_type() ==
+                                                                             Costing::bikeshare);
+    } else if (options.costing_type() == Costing::auto_pedestrian) {
+      mode = valhalla::sif::TravelMode::kDrive;
     }
     // this should never happen
     if (mode == TravelMode::kMaxTravelMode) {

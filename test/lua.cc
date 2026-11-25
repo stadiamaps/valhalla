@@ -1,32 +1,53 @@
-#include "test.h"
-
-#include <string>
-
 #include "mjolnir/graph_lua_proc.h"
 #include "mjolnir/luatagtransform.h"
 #include "mjolnir/osmdata.h"
 
+#include <gtest/gtest.h>
+#include <osmium/builder/osm_object_builder.hpp>
+
+#include <initializer_list>
+#include <string>
+
 using namespace valhalla;
 
 namespace {
+struct TagsBuilder {
+  osmium::memory::Buffer buffer;
+  osmium::builder::WayBuilder way_builder;
+  osmium::builder::TagListBuilder tags_builder;
+
+  TagsBuilder()
+      : buffer(1024, osmium::memory::Buffer::auto_grow::yes), way_builder(buffer),
+        tags_builder(way_builder) {
+  }
+
+  void insert(const std::pair<std::string, std::string>& tag) {
+    tags_builder.add_tag(tag);
+  }
+
+  const osmium::TagList& get() {
+    return way_builder.object().tags();
+  }
+};
+
 TEST(Lua, ZeroMantissa) {
   mjolnir::LuaTagTransform lua(std::string(lua_graph_lua, lua_graph_lua + lua_graph_lua_len));
 
-  mjolnir::Tags tags;
+  TagsBuilder tags;
   // Check that decimals are properly parsed
   tags.insert({"highway", "primary"});
   tags.insert({"maxheight", "2.0"});
-  auto results = lua.Transform(mjolnir::OSMType::kWay, 1, tags);
+  auto results = lua.Transform(mjolnir::OSMType::kWay, 1, tags.get());
   ASSERT_FLOAT_EQ(2.0f, std::stof(results["maxheight"]));
 }
 
-void assert_height_parses(std::string maxheight, float expected) {
+void assert_height_parses(const std::string& maxheight, float expected) {
   mjolnir::LuaTagTransform lua(std::string(lua_graph_lua, lua_graph_lua + lua_graph_lua_len));
 
-  mjolnir::Tags tags;
+  TagsBuilder tags;
   tags.insert({"highway", "tertiary"});
   tags.insert({"maxheight", maxheight});
-  auto results = lua.Transform(mjolnir::OSMType::kWay, 1, tags);
+  auto results = lua.Transform(mjolnir::OSMType::kWay, 1, tags.get());
   ASSERT_TRUE(results.count("maxheight") == 1);
   ASSERT_FLOAT_EQ(expected, std::stof(results["maxheight"]));
 }
@@ -92,10 +113,10 @@ TEST(Lua, NumberDoublePeriod) {
   // dots. This probably shouldn't be parsed?
   mjolnir::LuaTagTransform lua(std::string(lua_graph_lua, lua_graph_lua + lua_graph_lua_len));
 
-  mjolnir::Tags tags;
+  TagsBuilder tags;
   tags.insert({"highway", "tertiary"});
   tags.insert({"maxheight", "3..35"});
-  auto results = lua.Transform(mjolnir::OSMType::kWay, 1, tags);
+  auto results = lua.Transform(mjolnir::OSMType::kWay, 1, tags.get());
 
   // check that the maxheight isn't present...
   ASSERT_TRUE(results.count("maxheight") == 0);
@@ -109,7 +130,7 @@ TEST(Lua, TestForwardBackward) {
   // dots. This probably shouldn't be parsed?
   mjolnir::LuaTagTransform lua(std::string(lua_graph_lua, lua_graph_lua + lua_graph_lua_len));
 
-  mjolnir::Tags tags;
+  TagsBuilder tags;
   tags.insert({"highway", "tertiary"});
   tags.insert({"maxheight:forward", "1"});
   tags.insert({"maxheight:backward", "1"});
@@ -119,7 +140,7 @@ TEST(Lua, TestForwardBackward) {
   tags.insert({"maxwidth:backward", "1"});
   tags.insert({"maxweight:forward", "1"});
   tags.insert({"maxweight:backward", "1"});
-  auto results = lua.Transform(mjolnir::OSMType::kWay, 1, tags);
+  auto results = lua.Transform(mjolnir::OSMType::kWay, 1, tags.get());
 
   // check that the maxheight is present...
   ASSERT_TRUE(results.count("maxheight_forward") == 1);
@@ -130,6 +151,50 @@ TEST(Lua, TestForwardBackward) {
   ASSERT_TRUE(results.count("maxwidth_backward") == 1);
   ASSERT_TRUE(results.count("maxweight_forward") == 1);
   ASSERT_TRUE(results.count("maxweight_backward") == 1);
+}
+
+TEST(Lua, GolfCartAccessDirections) {
+  mjolnir::LuaTagTransform lua(std::string(lua_graph_lua, lua_graph_lua + lua_graph_lua_len));
+
+  const auto expect_access =
+      [&](const char* description,
+          std::initializer_list<std::pair<std::string, std::string>> access_tags,
+          const char* golf_forward, const char* golf_backward, const char* auto_forward,
+          const char* auto_backward) {
+        SCOPED_TRACE(description);
+        TagsBuilder tags;
+        tags.insert({"highway", "service"});
+        for (const auto& tag : access_tags) {
+          tags.insert(tag);
+        }
+        const auto result = lua.Transform(mjolnir::OSMType::kWay, 1, tags.get());
+        ASSERT_FALSE(result.empty());
+        EXPECT_EQ(result.at("golf_cart_forward"), golf_forward);
+        EXPECT_EQ(result.at("golf_cart_backward"), golf_backward);
+        EXPECT_EQ(result.at("auto_forward"), auto_forward);
+        EXPECT_EQ(result.at("auto_backward"), auto_backward);
+      };
+
+  expect_access("forward one-way", {{"oneway", "yes"}}, "true", "false", "true", "false");
+  expect_access("reverse one-way", {{"oneway", "-1"}}, "false", "true", "false", "true");
+  expect_access("golf cart exemption on reverse one-way",
+                {{"oneway", "-1"}, {"oneway:golf_cart", "no"}}, "true", "true", "false", "true");
+  expect_access("golf cart exemption on roundabout",
+                {{"junction", "roundabout"}, {"oneway:golf_cart", "no"}}, "true", "true", "true",
+                "false");
+  expect_access("overlapping reverse one-way tags",
+                {{"oneway", "-1"}, {"oneway:golf_cart", "-1"}}, "false", "true", "false", "true");
+  expect_access("golf cart only one-way",
+                {{"oneway", "-1"}, {"oneway:golf_cart", "yes"}}, "true", "false", "false", "true");
+  expect_access("explicit direction on reverse one-way",
+                {{"oneway", "-1"}, {"golf_cart:forward", "yes"}, {"golf_cart:backward", "no"}},
+                "true", "false", "false", "true");
+  expect_access("one-way exemption does not grant access",
+                {{"oneway", "yes"}, {"oneway:golf_cart", "no"}, {"golf_cart", "no"}}, "false",
+                "false", "true", "false");
+  expect_access("no golf cart access on driveway",
+                {{"service", "driveway"}, {"golf_cart", "no"}}, "false", "false", "true", "true");
+  expect_access("driveway default access", {{"service", "driveway"}}, "true", "true", "true", "true");
 }
 } // namespace
 

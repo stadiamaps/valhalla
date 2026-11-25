@@ -1,7 +1,7 @@
 #ifndef VALHALLA_SIF_NOCOST_H_
 #define VALHALLA_SIF_NOCOST_H_
 
-#include <valhalla/baldr/rapidjson_utils.h>
+#include <valhalla/baldr/rapidjson_fwd.h>
 #include <valhalla/proto/options.pb.h>
 #include <valhalla/sif/dynamiccost.h>
 
@@ -17,7 +17,8 @@ namespace sif {
  */
 void ParseNoCostOptions(const rapidjson::Document& doc,
                         const std::string& costing_options_key,
-                        Costing* pbf_costing);
+                        Costing* pbf_costing,
+                        google::protobuf::RepeatedPtrField<CodedDescription>& warnings);
 
 /**
  * Create an route cost method. This is generally shortest time but uses

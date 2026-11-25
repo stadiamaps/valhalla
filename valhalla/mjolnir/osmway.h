@@ -1,15 +1,15 @@
 #ifndef VALHALLA_MJOLNIR_PBFGRAPHBUILDER_OSMWAY_H
 #define VALHALLA_MJOLNIR_PBFGRAPHBUILDER_OSMWAY_H
 
+#include <valhalla/baldr/graphconstants.h>
+#include <valhalla/mjolnir/osmlinguistic.h>
+#include <valhalla/mjolnir/uniquenames.h>
+
 #include <cstdint>
 #include <cstring>
 #include <map>
 #include <string>
 #include <vector>
-
-#include <valhalla/baldr/graphconstants.h>
-#include <valhalla/mjolnir/osmlinguistic.h>
-#include <valhalla/mjolnir/uniquenames.h>
 
 namespace valhalla {
 namespace mjolnir {
@@ -1803,6 +1803,22 @@ struct OSMWay {
   }
 
   /**
+   * Sets the area flag.
+   * @param  area   Is this an area?
+   */
+  void set_area(const bool area) {
+    area_ = area;
+  }
+
+  /**
+   * Get the area flag.
+   * @return  Returns area flag.
+   */
+  bool area() const {
+    return area_;
+  }
+
+  /**
    * Sets the ferry flag.
    * @param  ferry   Is a ferry?
    */
@@ -2119,22 +2135,6 @@ struct OSMWay {
   }
 
   /**
-   * Set seasonal flag.
-   * @param  seasonal   Is this seasonal?
-   */
-  void set_seasonal(const bool seasonal) {
-    seasonal_ = seasonal;
-  }
-
-  /**
-   * Get the seasonal flag.
-   * @return  Returns seasonal flag.
-   */
-  bool seasonal() const {
-    return seasonal_;
-  }
-
-  /**
    * Set wheelchair flag.
    * @param  wheelchair   Is this wheelchair?
    */
@@ -2212,6 +2212,21 @@ struct OSMWay {
    */
   bool drive_on_right() const {
     return drive_on_right_;
+  }
+  /**
+   * Set multiple_levels flag.
+   * @param multiple_levels Is there a multiple levels?
+   */
+  void set_multiple_levels(const bool multiple_levels) {
+    multiple_levels_ = multiple_levels;
+  }
+
+  /**
+   * Get the multiple levels flag.
+   * @return Returns drive on right flag.
+   */
+  bool multiple_levels() const {
+    return multiple_levels_;
   }
 
   /**
@@ -2677,7 +2692,7 @@ struct OSMWay {
   uint32_t tunnel_ : 1;
   uint32_t toll_ : 1;
   uint32_t bridge_ : 1;
-  uint32_t seasonal_ : 1;
+  uint32_t multiple_levels_ : 1;
   uint32_t drive_on_right_ : 1;
   uint32_t bike_network_ : 4;
   uint32_t exit_ : 1;
@@ -2739,12 +2754,10 @@ struct OSMWay {
   uint16_t use_sidepath_ : 1;
   uint16_t bike_forward_ : 1;
   uint16_t bike_backward_ : 1;
-  // Flags which didn't fit elsewhere
   uint16_t lit_ : 1;
   uint16_t destination_only_hgv_ : 1;
-  // 2 access flags that didn't fit in the previous 16 bits
-  uint16_t golf_cart_forward_ : 1;
-  uint16_t golf_cart_backward_ : 1;
+  uint16_t area_ : 1;
+  uint16_t spare2_ : 1;
 
   uint16_t nodecount_;
 
@@ -2768,6 +2781,9 @@ struct OSMWay {
 
   // layer index(Z-level) of the way relatively to other levels
   int8_t layer_;
+
+  uint8_t golf_cart_forward_ : 1;
+  uint8_t golf_cart_backward_ : 1;
 };
 
 } // namespace mjolnir

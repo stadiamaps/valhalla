@@ -23,11 +23,17 @@ To use protobuf as a request/input to the HTTP API you need to do two things:
 * Send the proper HTTP header to signal a protobuf payload. The header should be: `Content-Type: application/x-protobuf`
 * Send protocol buffer's serialized bytes as the body of the HTTP request
 
-The message we use for the entire transaction is the `Api` message, whose definition you can find [here](https://github.com/valhalla/valhalla/blob/master/proto/api.proto). All of the request parameters should be filled out via the `Options` message attached to the `Api` message. Most importantly, you will want to set your `format` to `pbf` and your `action` to the relevant API you are calling (though the HTTP request path also provides the latter). The `options` object also contains a subobject named `pbf_field_selector` which can be used to turn on/off the top level fields in the response. For example, if you only want the `directions` part of the protobuf response to be present (much smaller payload) then turn on only that flag in the field selector. The rest of the request options depend on which API you are calling. For more information about what and which options to set for a given API please read that APIs specific docs regarding its request options.
+The message we use for the entire transaction is the `Api` message, whose definition you can find [here](https://github.com/valhalla/valhalla/blob/master/proto/descriptors/api.proto). All of the request parameters should be filled out via the `Options` message attached to the `Api` message. Most importantly, you will want to set your `format` to `pbf` and your `action` to the relevant API you are calling (though the HTTP request path also provides the latter). The `options` object also contains a subobject named `pbf_field_selector` which can be used to turn on/off the top level fields in the response. For example, if you only want the `directions` part of the protobuf response to be present (much smaller payload) then turn on only that flag in the field selector. The rest of the request options depend on which API you are calling. For more information about what and which options to set for a given API please read that APIs specific docs regarding its request options.
 
 ## Response
 
-As with the request/input, the response/output will again be the `Api` message but will have more parts of it filled out. Depending on which API you are calling different parts of the response object will be filled out. Route-like responses will have `Trip` and `Directions` objects filled out whereas non-route APIs will have different parts of the message filled out. Not all APIs support protobuf output. Those that don't, will return JSON as they do today. Currently, the following APIs support protobuf as output: `route, trace_route, optimized_route, centroid, trace_attributes, status` 
+As with the request/input, the response/output will again be the `Api` message but will have more parts of it filled out. Depending on which API you are calling different parts of the response object will be filled out. Route-like responses will have `Trip` and `Directions` objects filled out whereas non-route APIs will have different parts of the message filled out. Not all APIs support protobuf output. Those that don't, will return JSON as they do today. Currently, the following APIs support protobuf as output: `route`, `matrix`, `isochrone`, `expansion`, `trace_route`, `trace_attributes`, `optimized_route`, `centroid`, `status`
+
+## Node.js Bindings
+
+The Node.js bindings (`@valhallajs/valhallajs`) support protobuf format for all compatible APIs. When you specify `format: 'pbf'` in your request, the bindings will return a Node.js `Buffer` containing the serialized protobuf data instead of a parsed JSON object.
+
+For more information, see the [Node.js bindings README](https://github.com/valhalla/valhalla/blob/master/src/bindings/nodejs/README.md#protocol-buffer-support).
 
 ## Future Work
 

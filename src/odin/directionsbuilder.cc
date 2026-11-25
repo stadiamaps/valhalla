@@ -1,5 +1,5 @@
 #include "odin/directionsbuilder.h"
-#include "midgard/logging.h"
+#include "exceptions.h"
 #include "odin/enhancedtrippath.h"
 #include "odin/maneuversbuilder.h"
 #include "odin/markup_formatter.h"
@@ -7,11 +7,10 @@
 #include "odin/narrativebuilder.h"
 #include "proto/directions.pb.h"
 #include "proto/options.pb.h"
-#include "worker.h"
 
 namespace {
 // Minimum edge length to verify heading (~3 feet)
-constexpr auto kMinEdgeLength = 0.001f;
+constexpr auto kMinLengthHeading = 0.001f;
 
 } // namespace
 
@@ -64,21 +63,21 @@ void DirectionsBuilder::Build(Api& api, const MarkupFormatter& markup_formatter)
 // Update the heading of ~0 length edges.
 void DirectionsBuilder::UpdateHeading(EnhancedTripLeg* etp) {
 
-  for (size_t x = 0; x < etp->node_size(); ++x) {
+  for (int x = 0; x < etp->node_size(); ++x) {
     auto prev_edge = etp->GetPrevEdge(x);
     auto curr_edge = etp->GetCurrEdge(x);
     auto next_edge = etp->GetNextEdge(x);
 
     // If very short edge and no headings
-    if (curr_edge && (curr_edge->length_km() <= kMinEdgeLength) &&
+    if (curr_edge && (curr_edge->length_km() <= kMinLengthHeading) &&
         (curr_edge->begin_heading() == 0) && (curr_edge->end_heading() == 0)) {
       // Use next edge to set the current begin/end heading
-      if (next_edge && (next_edge->length_km() > kMinEdgeLength)) {
+      if (next_edge && (next_edge->length_km() > kMinLengthHeading)) {
         curr_edge->set_begin_heading(next_edge->begin_heading());
         curr_edge->set_end_heading(next_edge->begin_heading());
       }
       // Use prev edge to set the current begin/end heading
-      else if (prev_edge && (prev_edge->length_km() > kMinEdgeLength)) {
+      else if (prev_edge && (prev_edge->length_km() > kMinLengthHeading)) {
         curr_edge->set_begin_heading(prev_edge->end_heading());
         curr_edge->set_end_heading(prev_edge->end_heading());
       }
@@ -407,6 +406,10 @@ void DirectionsBuilder::PopulateDirectionsLeg(const Options& options,
         trip_maneuver->set_transit_type(maneuver.transit_type());
         break;
       }
+      case TravelMode_INT_MIN_SENTINEL_DO_NOT_USE_:
+      case TravelMode_INT_MAX_SENTINEL_DO_NOT_USE_:
+        // Sentinel values - should not occur in practice
+        break;
     }
   }
 

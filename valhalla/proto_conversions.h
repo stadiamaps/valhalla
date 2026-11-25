@@ -1,12 +1,21 @@
 #pragma once
-#include <valhalla/baldr/graphconstants.h>
 #include <valhalla/midgard/pointll.h>
-#include <valhalla/proto/api.pb.h>
+#include <valhalla/proto/directions.pb.h>
+#include <valhalla/proto/expansion.pb.h>
 #include <valhalla/proto/incidents.pb.h>
 #include <valhalla/proto/matrix.pb.h>
+#include <valhalla/proto/options.pb.h>
+#include <valhalla/proto/trip.pb.h>
 #include <valhalla/sif/costconstants.h>
 
 namespace valhalla {
+// Layer names for vector tiles
+constexpr std::string_view kEdgeLayerName = "edges";
+constexpr std::string_view kNodeLayerName = "nodes";
+constexpr std::string_view kAccessRestrictionLayerName = "access_restrictions";
+constexpr std::string_view kShortcutLayerName = "shortcuts";
+constexpr std::string_view kIncidentLayerName = "incidents";
+
 // Associate RoadClass values to TripLeg proto
 constexpr valhalla::RoadClass kTripLegRoadClass[] = {valhalla::RoadClass::kMotorway,
                                                      valhalla::RoadClass::kTrunk,
@@ -18,6 +27,19 @@ constexpr valhalla::RoadClass kTripLegRoadClass[] = {valhalla::RoadClass::kMotor
                                                      valhalla::RoadClass::kServiceOther};
 inline valhalla::RoadClass GetRoadClass(const baldr::RoadClass road_class) {
   return kTripLegRoadClass[static_cast<int>(road_class)];
+}
+
+// Associate SpeedType values to TripLeg proto
+constexpr TripLeg_SpeedType kTripLegSpeedType[] = {TripLeg_SpeedType_kTagged,
+                                                   TripLeg_SpeedType_kClassified};
+inline TripLeg_SpeedType GetTripLegSpeedType(const baldr::SpeedType speed_type) {
+  return kTripLegSpeedType[static_cast<int>(speed_type)];
+}
+
+// Associate HovTypes values to TripLeg proto
+constexpr TripLeg_HovType kTripLegHovType[] = {TripLeg_HovType_kHOV2, TripLeg_HovType_kHOV3};
+inline TripLeg_HovType GetTripLegHovType(const baldr::HOVEdgeType hov_type) {
+  return kTripLegHovType[static_cast<int>(hov_type)];
 }
 
 // Associate Surface values to TripLeg proto
@@ -32,13 +54,18 @@ inline TripLeg_Surface GetTripLegSurface(const baldr::Surface surface) {
 // Associate vehicle types to TripLeg proto
 // TODO - why doesn't these use an enum input?
 constexpr VehicleType kTripLegVehicleType[] = {
-    VehicleType::kCar,      VehicleType::kMotorcycle,   VehicleType::kAutoBus,
-    VehicleType::kTruck,    VehicleType::kMotorScooter, VehicleType::kLowSpeedVehicle,
-    VehicleType::kGolfCart,
+    VehicleType::kCar,   VehicleType::kMotorcycle,   VehicleType::kAutoBus,
+    VehicleType::kTruck, VehicleType::kMotorScooter,
 };
 inline VehicleType GetTripLegVehicleType(const uint8_t type) {
-  return (type <= static_cast<uint8_t>(sif::VehicleType::kGolfCart)) ? kTripLegVehicleType[type]
-                                                                     : kTripLegVehicleType[0];
+  if (type == static_cast<uint8_t>(sif::VehicleType::kLowSpeedVehicle)) {
+    return VehicleType::kLowSpeedVehicle;
+  }
+  if (type == static_cast<uint8_t>(sif::VehicleType::kGolfCart)) {
+    return VehicleType::kGolfCart;
+  }
+  return (type <= static_cast<uint8_t>(sif::VehicleType::kMotorScooter)) ? kTripLegVehicleType[type]
+                                                                       : kTripLegVehicleType[0];
 }
 
 // Associate pedestrian types to TripLeg proto
@@ -463,6 +490,8 @@ inline TripLeg_Use GetTripLegUse(const baldr::Use use) {
       return TripLeg_Use_kLivingStreetUse;
     case baldr::Use::kServiceRoad:
       return TripLeg_Use_kServiceRoadUse;
+    case baldr::Use::kCycleStreet:
+      return TripLeg_Use_kCycleStreetUse;
     case baldr::Use::kCycleway:
       return TripLeg_Use_kCyclewayUse;
     case baldr::Use::kMountainBike:
@@ -476,6 +505,8 @@ inline TripLeg_Use GetTripLegUse(const baldr::Use use) {
       return TripLeg_Use_kElevatorUse;
     case baldr::Use::kSteps:
       return TripLeg_Use_kStepsUse;
+    case baldr::Use::kLadder:
+      return TripLeg_Use_kLadderUse;
     case baldr::Use::kEscalator:
       return TripLeg_Use_kEscalatorUse;
     case baldr::Use::kPath:
@@ -520,7 +551,7 @@ const std::string& MatrixAlgoToString(const valhalla::Matrix::Algorithm algo);
 // Get the string representing the incident-type
 std::string incidentTypeToString(const valhalla::IncidentsTile::Metadata::Type& incident_type);
 // Get the string representing the incident-Impact
-const char* incidentImpactToString(const valhalla::IncidentsTile::Metadata::Impact& impact);
+std::string_view incidentImpactToString(const valhalla::IncidentsTile::Metadata::Impact& impact);
 // Get the string representing the guidance view type
 const std::string& GuidanceViewTypeToString(const valhalla::DirectionsLeg_GuidanceView_Type type);
 
@@ -548,7 +579,10 @@ const std::string& Location_SideOfStreet_Enum_Name(const Location::SideOfStreet 
 bool Options_ExpansionProperties_Enum_Parse(const std::string& prop, Options::ExpansionProperties* a);
 bool Options_ExpansionAction_Enum_Parse(const std::string& action, Options::Action* a);
 const std::string& Expansion_EdgeStatus_Enum_Name(const Expansion_EdgeStatus status);
+bool Options_ReverseTimeTracking_Enum_Parse(const std::string& strategy,
+                                            Options::ReverseTimeTracking* f);
 
+const std::string_view TravelMode_Enum_Name(const TravelMode mode);
 std::pair<std::string, std::string>
 travel_mode_type(const valhalla::DirectionsLeg_Maneuver& maneuver);
 

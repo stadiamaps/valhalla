@@ -1,11 +1,11 @@
 #ifndef VALHALLA_MJOLNIR_OSMRESTRICTION_H
 #define VALHALLA_MJOLNIR_OSMRESTRICTION_H
 
-#include <cstdint>
 #include <valhalla/baldr/complexrestriction.h>
 #include <valhalla/baldr/graphconstants.h>
 #include <valhalla/baldr/graphid.h>
 
+#include <cstdint>
 #include <vector>
 
 namespace valhalla {
@@ -152,7 +152,7 @@ struct OSMRestriction {
   // Via is a node. When parsing OSM this is stored as an OSM node Id.
   // It later gets changed into a GraphId.
   union ViaNode {
-    ViaNode() {
+    ViaNode() : osmid(0) {
     }
     baldr::GraphId id;
     uint64_t osmid;

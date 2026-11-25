@@ -6,16 +6,42 @@
 namespace valhalla {
 namespace baldr {
 
+namespace {
+std::unordered_set<std::string_view>
+PrecomputeEnabledCategories(const std::unordered_map<std::string_view, bool>& attributes) {
+  std::unordered_set<std::string_view> enabled_categories;
+  for (const auto& pair : attributes) {
+    if (!pair.second) {
+      continue;
+    }
+
+    const auto dot_pos = pair.first.find('.');
+    if (dot_pos == std::string_view::npos) {
+      // it may happen for some attributes that they don't have category (e.g. kOsmChangeset)
+      continue;
+    }
+
+    // must have a dot in the end
+    auto category = pair.first.substr(0, dot_pos + 1);
+    enabled_categories.insert(category);
+  }
+  return enabled_categories;
+}
+} // namespace
+
 /*
  * Map of attributes that a user can request to enable or disable, and their defaults.
  * Most attributes are enabled by default but a few additional attributes are disabled
  * unless explicitly included with the filter attributes request option.
  */
-const std::unordered_map<std::string, bool> AttributesController::kDefaultAttributes = {
+const std::unordered_map<std::string_view, bool> AttributesController::kDefaultAttributes = {
     // Edge keys
     {kEdgeNames, true},
     {kEdgeLength, true},
     {kEdgeSpeed, true},
+    {kEdgeSpeedType, true},
+    {kEdgeSpeedsFaded, true},
+    {kEdgeSpeedsNonFaded, true},
     {kEdgeRoadClass, true},
     {kEdgeBeginHeading, true},
     {kEdgeEndHeading, true},
@@ -59,6 +85,8 @@ const std::unordered_map<std::string, bool> AttributesController::kDefaultAttrib
     {kEdgeTransitRouteInfoOperatorUrl, true},
     {kEdgeId, true},
     {kEdgeWayId, true},
+    {kEdgeBeginOsmNodeId, true},
+    {kEdgeEndOsmNodeId, true},
     {kEdgeWeightedGrade, true},
     {kEdgeMaxUpwardGrade, true},
     {kEdgeMaxDownwardGrade, true},
@@ -78,6 +106,7 @@ const std::unordered_map<std::string, bool> AttributesController::kDefaultAttrib
     {kEdgeTruckRoute, true},
     {kEdgeDefaultSpeed, true},
     {kEdgeDestinationOnly, true},
+    {kEdgeDestinationOnlyHGV, false},
     {kEdgeIsUrban, false},
     {kEdgeTaggedValues, true},
     {kEdgeIndoor, true},
@@ -85,6 +114,47 @@ const std::unordered_map<std::string, bool> AttributesController::kDefaultAttrib
     {kEdgeCountryCrossing, true},
     {kEdgeForward, true},
     {kEdgeLevels, true},
+    {kEdgeTrafficSignal, true},
+    {kEdgeHovType, false},
+    {kEdgeSpeedType, false},
+    {kEdgeRamp, false},
+    {kEdgeDismount, false},
+    {kEdgeUseSidepath, false},
+    {kEdgeSidewalkLeft, false},
+    {kEdgeSidewalkRight, false},
+    {kEdgeBSSConnection, false},
+    {kEdgeLit, false},
+    {kEdgeNotThru, false},
+    {kEdgePartComplexRestriction, false},
+    {kEdgeLayer, false},
+    {kEdgeShortcut, false},
+    {kEdgeLeavesTile, false},
+    {kEdgeCurvature, false},
+
+    // Mostly MVT relevant
+    {kEdgeSpeedFwd, false},
+    {kEdgeDeadendFwd, false},
+    {kEdgeLaneCountFwd, false},
+    {kEdgeTruckSpeedFwd, false},
+    {kEdgeSignalFwd, false},
+    {kEdgeStopSignFwd, false},
+    {kEdgeYieldFwd, false},
+    {kEdgeAccessFwd, false},
+    {kEdgeLiveSpeedFwd, false},
+    {kEdgeFreeflowSpeedFwd, false},
+    {kEdgeConstrainedSpeedFwd, false},
+
+    {kEdgeSpeedBwd, false},
+    {kEdgeDeadendBwd, false},
+    {kEdgeLaneCountBwd, false},
+    {kEdgeTruckSpeedBwd, false},
+    {kEdgeSignalBwd, false},
+    {kEdgeStopSignBwd, false},
+    {kEdgeYieldBwd, false},
+    {kEdgeAccessBwd, false},
+    {kEdgeLiveSpeedBwd, false},
+    {kEdgeFreeflowSpeedBwd, false},
+    {kEdgeConstrainedSpeedBwd, false},
 
     // Node keys
     {kIncidents, false},
@@ -101,6 +171,7 @@ const std::unordered_map<std::string, bool> AttributesController::kDefaultAttrib
     {kNodeElapsedTime, true},
     {kNodeAdminIndex, true},
     {kNodeType, true},
+    {kNodeTrafficSignal, true},
     {kNodeFork, true},
     {kNodeTransitPlatformInfoType, true},
     {kNodeTransitPlatformInfoOnestopId, true},
@@ -120,6 +191,16 @@ const std::unordered_map<std::string, bool> AttributesController::kDefaultAttrib
     {kNodeTransitEgressInfoLatLon, true},
     {kNodeTimeZone, true},
     {kNodeTransitionTime, true},
+    {kNodeStopImpact, false},
+    {kNodeDriveOnRight, false},
+    {kNodeElevation, false},
+    {kNodeTaggedAccess, false},
+    {kNodePrivateAccess, false},
+    {kNodeCashOnlyToll, false},
+    {kNodeModeChangeAllowed, false},
+    {kNodeNamedIntersection, false},
+    {kNodeIsTransit, false},
+    {kNodeAccess, false},
 
     // Top level: admin list, full shape, and shape bounding box keys
     {kOsmChangeset, true},
@@ -144,10 +225,34 @@ const std::unordered_map<std::string, bool> AttributesController::kDefaultAttrib
     {kShapeAttributesSpeed, false},
     {kShapeAttributesSpeedLimit, false},
     {kShapeAttributesClosure, false},
+    {kShapeAttributesCongestion, false},
+
+    // Incidents properties
+    {kIncidentId, false},
+    {kIncidentType, false},
+    {kIncidentDescription, false},
+    {kIncidentSubType, false},
+    {kIncidentSubTypeDescription, false},
+    {kIncidentStartTime, false},
+    {kIncidentEndTime, false},
+    {kIncidentImpact, false},
+    {kIncidentRoadClosed, false},
+    {kIncidentCongestionValue, false},
+    {kIncidentCreationTime, false},
+    {kIncidentLongDescription, false},
+    {kIncidentClearLanes, false},
+    {kIncidentNumLanesBlocked, false},
+    {kIncidentLength, false},
+    {kIncidentIso31661Alpha2, false},
+    {kIncidentIso31661Alpha3, false},
 };
+
+const std::unordered_set<std::string_view> AttributesController::kDefaultEnabledCategories =
+    PrecomputeEnabledCategories(kDefaultAttributes);
 
 AttributesController::AttributesController() {
   attributes = kDefaultAttributes;
+  enabled_categories = kDefaultEnabledCategories;
 }
 
 AttributesController::AttributesController(const Options& options, bool is_strict_filter) {
@@ -157,7 +262,7 @@ AttributesController::AttributesController(const Options& options, bool is_stric
   switch (options.filter_action()) {
     case (FilterAction::include): {
       if (is_strict_filter)
-        disable_all();
+        set_all(false);
       for (const auto& filter_attribute : options.filter_attributes()) {
         try {
           attributes.at(filter_attribute) = true;
@@ -166,6 +271,8 @@ AttributesController::AttributesController(const Options& options, bool is_stric
       break;
     }
     case (FilterAction::exclude): {
+      if (is_strict_filter)
+        set_all(true);
       for (const auto& filter_attribute : options.filter_attributes()) {
         try {
           attributes.at(filter_attribute) = false;
@@ -179,28 +286,14 @@ AttributesController::AttributesController(const Options& options, bool is_stric
 
   // Set the edge elevation attributes based on elevation interval being set
   attributes.at(kEdgeElevation) = options.elevation_interval() > 0.0f;
+
+  enabled_categories = PrecomputeEnabledCategories(attributes);
 }
 
-void AttributesController::disable_all() {
+void AttributesController::set_all(const bool value) {
   for (auto& pair : attributes) {
-    pair.second = false;
+    pair.second = value;
   }
-}
-
-bool AttributesController::operator()(const std::string& key) const {
-  return attributes.at(key);
-}
-
-// Used to check if any keys starting with the `category` string are enabled.
-bool AttributesController::category_attribute_enabled(const std::string& category) const {
-  for (const auto& pair : attributes) {
-    // if the key starts with the specified category and it is enabled
-    // then return true
-    if ((pair.first.compare(0, category.size(), category) == 0) && pair.second) {
-      return true;
-    }
-  }
-  return false;
 }
 
 } // namespace baldr

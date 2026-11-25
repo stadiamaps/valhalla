@@ -1,29 +1,175 @@
+cmake_minimum_required(VERSION 3.26 FATAL_ERROR)
+
+include(ValhallaVersion)
+
 if (PREFER_EXTERNAL_DEPS)
-  find_package(pybind11 QUIET)
-  if (NOT pybind11_FOUND)
-    message(WARNING "No pybind11 found in system libraries, using vendored pybind11...")
+  find_package(nanobind QUIET CONFIG)
+  if (NOT TARGET nanobind::nanobind)
+    message(WARNING "No nanobind found in system libraries, using vendored nanobind...")
   endif()
 endif()
 
-if (NOT TARGET pybind11::pybind11_headers)
-  add_subdirectory(${VALHALLA_SOURCE_DIR}/third_party/pybind11 ${CMAKE_BINARY_DIR}/third_party/pybind11)
+if (NOT TARGET nanobind::nanobind)
+  add_subdirectory(${VALHALLA_SOURCE_DIR}/third_party/nanobind ${CMAKE_BINARY_DIR}/third_party/nanobind EXCLUDE_FROM_ALL)
 endif()
 
-pybind11_add_module(python_valhalla python.cc)
-target_link_libraries(python_valhalla PUBLIC valhalla)
-set_target_properties(python_valhalla PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/valhalla)
+message(STATUS "Installing python modules to ${Python_SITEARCH}")
+
+# See: https://github.com/actions/runner/issues/2508
+# See: https://www.mail-archive.com/ptxdist@pengutronix.de/msg24413.html
+nanobind_add_module(_valhalla
+  NB_STATIC
+  STABLE_ABI
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/_valhalla.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/actor.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/exceptions.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/baldr/graph_id.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/baldr/graph_tile_header.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/baldr/utils/graph_reader.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/baldr/utils/graph_tile.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/baldr/utils/predicted_speeds.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/midgard/utils/polyline.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/mjolnir/util.cc)
+
+# force abi3.so extension
+nanobind_extension_abi3(_valhalla)
+
+target_include_directories(_valhalla PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared)
+target_link_libraries(_valhalla PRIVATE
+  valhalla
+  Python::SABIModule
+  $<$<BOOL:${ENABLE_COVERAGE}>:gcov>)
+
+if(APPLE)
+  set_target_properties(_valhalla PROPERTIES INSTALL_RPATH "@loader_path")
+elseif(UNIX AND NOT APPLE)
+  set_target_properties(_valhalla PROPERTIES INSTALL_RPATH "\$ORIGIN")
+endif()
+
+set_target_properties(_valhalla PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/valhalla)
 set_target_properties(valhalla PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/__init__.py ${CMAKE_CURRENT_BINARY_DIR}/valhalla/__init__.py COPYONLY)
-configure_file(${VALHALLA_SOURCE_DIR}/scripts/valhalla_build_config ${CMAKE_CURRENT_BINARY_DIR}/valhalla/valhalla_build_config.py COPYONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.py ${CMAKE_CURRENT_BINARY_DIR}/valhalla/config.py COPYONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/actor.py ${CMAKE_CURRENT_BINARY_DIR}/valhalla/actor.py COPYONLY)
+# On windows from python 3.8+ there is no more searching for dlls on path for your modules. the only thing
+# that seemed to work was copying them next to each .pyd file so that stubgen finds them using windows
+# default of looking at siblings in the directory. lLinux/mac use RPATH for this. because some deps have
+# private shared libs we copy with a glob because otherwise we dont know the names of those deps
+if(WIN32)
+  set(_pybind_dll_dirs "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin")
+  foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
+    if(IS_DIRECTORY "${_prefix}/bin")
+      list(APPEND _pybind_dll_dirs "${_prefix}/bin")
+    endif()
+  endforeach()
+  set(_pybind_dlls)
+  foreach(_dir IN LISTS _pybind_dll_dirs)
+    file(GLOB _these "${_dir}/*.dll")
+    list(APPEND _pybind_dlls ${_these})
+  endforeach()
+  add_custom_command(TARGET _valhalla POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      $<TARGET_RUNTIME_DLLS:_valhalla> ${_pybind_dlls} $<TARGET_FILE_DIR:_valhalla>
+    COMMAND_EXPAND_LISTS)
+endif()
 
-message(STATUS "Installing python modules to ${Python_SITEARCH}")
+# Generate Python type stubs (.pyi) from the compiled extension modules.
+# Stubs are committed to the source tree and refreshed on every build;
+# INCLUDE_PRIVATE keeps "_"-prefixed members in the output; the POST_BUILD
+# step prepends a "machine-generated" banner via an idempotent script.
+#
+# Skipped under ENABLE_SANITIZERS: nanobind_add_stub imports the compiled
+# module via a vanilla python3, which can't load an ASan-instrumented .so
+if (NOT ENABLE_SANITIZERS)
+  function(valhalla_python_stub module rel_pyi)
+    set(_pyi ${CMAKE_CURRENT_SOURCE_DIR}/${rel_pyi})
+    nanobind_add_stub(${module}_stub
+      MODULE ${module}
+      OUTPUT ${_pyi}
+      PYTHON_PATH $<TARGET_FILE_DIR:${module}>
+      DEPENDS ${module}
+      INCLUDE_PRIVATE)
+    add_custom_command(TARGET ${module}_stub POST_BUILD
+      COMMAND ${Python_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/scripts/prepend_pyi_header.py ${_pyi})
+  endfunction()
+
+  valhalla_python_stub(_valhalla valhalla/_valhalla.pyi)
+endif()
+
+set(py_srcs
+  valhalla/__init__.py
+  valhalla/__version__.py
+  valhalla/config.py
+  valhalla/actor.py
+  valhalla/baldr/__init__.py
+  valhalla/baldr/utils/__init__.py
+  valhalla/baldr/utils/graph_utils.py
+  valhalla/baldr/utils/tar_index.py
+  valhalla/midgard/__init__.py
+  valhalla/midgard/utils/__init__.py
+  valhalla/mjolnir/__init__.py
+  valhalla/utils/__init__.py)
+
+# scikit-build-core does a different build than CMake
+if (SKBUILD)
+  # SKBUILD_PLATLIB_DIR: the platlib path inside the wheel (site-packages or dist-packages or so)
+  set(VALHALLA_INSTALL_PYDIR "${SKBUILD_PLATLIB_DIR}")
+
+  list(APPEND py_srcs
+    valhalla/__main__.py
+    valhalla/_scripts.py)
+
+  # install the executables when built with scikit-build-core (not with CMake directly)
+  function(install_executable exe)
+    install(TARGETS ${exe}
+      DESTINATION "${VALHALLA_INSTALL_PYDIR}/valhalla/bin"
+      COMPONENT python)
+  endfunction()
+
+  if (ENABLE_TOOLS)
+    set(tools valhalla_service)
+    foreach (exe ${tools})
+      install_executable(${exe})
+    endforeach()
+  endif()
+
+  if (ENABLE_DATA_TOOLS)
+    set(data_tools valhalla_build_tiles valhalla_build_admins valhalla_add_predicted_traffic valhalla_add_landmarks valhalla_ingest_transit valhalla_convert_transit)
+    foreach (exe ${data_tools})
+      install_executable(${exe})
+    endforeach()
+  endif()
+else()
+  set(VALHALLA_INSTALL_PYDIR "${Python_SITEARCH}")
+  # write the __version__.py
+  file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/valhalla/__version__.py"
+    "__version__ = \"${VERSION}\"\n")
+endif()
+
+# propagate up to the parent
+set(Python_FOUND ${Python_FOUND} PARENT_SCOPE)
+
+# copy valhalla python sources from src to build
+function(set_output_python rel_path)
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${rel_path} ${CMAKE_CURRENT_BINARY_DIR}/${rel_path} COPYONLY)
+endfunction()
+
+configure_file(${VALHALLA_SOURCE_DIR}/scripts/valhalla_build_config ${CMAKE_CURRENT_BINARY_DIR}/valhalla/valhalla_build_config.py COPYONLY)
+configure_file(${VALHALLA_SOURCE_DIR}/scripts/valhalla_build_elevation ${CMAKE_CURRENT_BINARY_DIR}/valhalla/valhalla_build_elevation.py COPYONLY)
+configure_file(${VALHALLA_SOURCE_DIR}/scripts/valhalla_build_extract ${CMAKE_CURRENT_BINARY_DIR}/valhalla/valhalla_build_extract.py COPYONLY)
+
+foreach (py_src ${py_srcs})
+  set_output_python(${py_src})
+endforeach()
+
+install(TARGETS _valhalla
+  DESTINATION "${VALHALLA_INSTALL_PYDIR}/valhalla"
+  COMPONENT python)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/valhalla/_valhalla.pyi
+  DESTINATION "${VALHALLA_INSTALL_PYDIR}/valhalla"
+  COMPONENT python)
 install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/valhalla
-DESTINATION "${Python_SITEARCH}"
-COMPONENT runtime
-FILES_MATCHING PATTERN "*.py")
-install(TARGETS python_valhalla
-DESTINATION "${Python_SITEARCH}/valhalla"
-COMPONENT runtime)
+  DESTINATION "${VALHALLA_INSTALL_PYDIR}"
+  COMPONENT python
+  FILES_MATCHING
+    PATTERN "*.py"
+    PATTERN "__pycache__" EXCLUDE)

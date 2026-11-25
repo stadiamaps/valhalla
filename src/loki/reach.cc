@@ -15,10 +15,10 @@ Reach::Reach() : Dijkstras() {
 
 void Reach::enqueue(const baldr::GraphId& node_id,
                     baldr::GraphReader& reader,
-                    const std::shared_ptr<sif::DynamicCost>& costing,
+                    const sif::cost_ptr_t& costing,
                     graph_tile_ptr tile) {
   // skip nodes which are done or invalid
-  if (!node_id.Is_Valid() || done_.find(node_id) != done_.cend())
+  if (!node_id.is_valid() || done_.find(node_id) != done_.cend())
     return;
   // if the node isnt accessible bail
   if (!reader.GetGraphTile(node_id, tile))
@@ -44,7 +44,7 @@ directed_reach Reach::operator()(const DirectedEdge* edge,
                                  const baldr::GraphId edge_id,
                                  uint32_t max_reach,
                                  GraphReader& reader,
-                                 const std::shared_ptr<sif::DynamicCost>& costing,
+                                 const sif::cost_ptr_t& costing,
                                  uint8_t direction) {
 
   // no reach is needed
@@ -73,7 +73,7 @@ directed_reach Reach::operator()(const DirectedEdge* edge,
   Clear();
   graph_tile_ptr tile, start_tile = reader.GetGraphTile(edge_id);
   if ((tile = start_tile) &&
-      costing->Allowed(edge, tile, sif::kDisallowSimpleRestriction | sif::kDisallowShortcut))
+      costing->Allowed(edge, tile, edge_id, sif::kDisallowSimpleRestriction | sif::kDisallowShortcut))
     enqueue(edge->endnode(), reader, costing, tile);
 
   // get outbound reach by doing a simple forward expansion until you either hit the max_reach
@@ -87,14 +87,16 @@ directed_reach Reach::operator()(const DirectedEdge* edge,
     // expand from the node
     if (!reader.GetGraphTile(node_id, tile))
       continue;
+    auto out_edge_id = GraphId(node_id.tileid(), node_id.level(), tile->node(node_id)->edge_index());
     for (const auto& edge : tile->GetDirectedEdges(node_id)) {
+      const auto out_id = out_edge_id++;
       // TODO: we'd rather say !edge.end_simple_restriction() and not !edge.restrictions()
       // TODO: but we'd need the predecessor information to do that so we punt 1 edge earlier
       // NOTE: we can go through the start of the restriction because only the end would mark a
       // potential stopping point (maybe a path followed the restriction)
 
       // if this edge is traversable we enqueue its end node
-      if (costing->Allowed(&edge, tile, forward_disallow_mask))
+      if (costing->Allowed(&edge, tile, out_id, forward_disallow_mask))
         enqueue(edge.endnode(), reader, costing, tile);
     }
   }
@@ -108,7 +110,7 @@ directed_reach Reach::operator()(const DirectedEdge* edge,
 
   // seed the expansion with a place to start expanding from, tile may have changed so reset it
   Clear();
-  if ((tile = start_tile) && costing->Allowed(edge, tile, sif::kDisallowShortcut))
+  if ((tile = start_tile) && costing->Allowed(edge, tile, edge_id, sif::kDisallowShortcut))
     enqueue(reader.GetBeginNodeId(edge, tile), reader, costing, tile);
 
   // get inbound reach by doing a simple reverse expansion until you either hit the max_reach
@@ -123,19 +125,22 @@ directed_reach Reach::operator()(const DirectedEdge* edge,
     if (!reader.GetGraphTile(node_id, tile))
       continue;
 
-    for (const auto& edge : tile->GetDirectedEdges(node_id)) {
+    const auto node_tile = tile;
+    auto edge_id = GraphId(node_id.tileid(), node_id.level(), node_tile->node(node_id)->edge_index());
+    for (const auto& edge : node_tile->GetDirectedEdges(node_id)) {
       // get the opposing edge
-      if (!reader.GetGraphTile(edge.endnode(), tile))
+      const DirectedEdge* opp_edge = nullptr;
+      const auto opp_edge_id = reader.GetOpposingEdgeId(edge_id, opp_edge, tile);
+      ++edge_id;
+      if (!opp_edge)
         continue;
-      const auto* node = tile->node(edge.endnode());
-      const auto* opp_edge = tile->directededge(node->edge_index() + edge.opp_index());
 
       // NOTE: we can go through the end of the restriction because only the start would mark a
       // potential stopping point (maybe a path followed the restriction). We also have to stop
       // at the start of a simple restriction because it could have been on our path
 
       // if this opposing edge is traversable we enqueue its begin node
-      if (costing->Allowed(opp_edge, tile, reverse_disallow_mask))
+      if (costing->Allowed(opp_edge, tile, opp_edge_id, reverse_disallow_mask))
         enqueue(edge.endnode(), reader, costing, tile);
     }
   }
@@ -159,13 +164,13 @@ directed_reach Reach::exact(const valhalla::baldr::DirectedEdge* edge,
                             const GraphId edge_id,
                             uint32_t max_reach,
                             valhalla::baldr::GraphReader& reader,
-                            const std::shared_ptr<sif::DynamicCost>& costing,
+                            const sif::cost_ptr_t& costing,
                             uint8_t direction) {
   // can we even try to expand?
   directed_reach reach{};
 
   graph_tile_ptr tile = reader.GetGraphTile(edge_id);
-  if (!tile || !costing->Allowed(edge, tile, sif::kDisallowShortcut)) {
+  if (!tile || !costing->Allowed(edge, tile, edge_id, sif::kDisallowShortcut)) {
     return reach;
   }
 

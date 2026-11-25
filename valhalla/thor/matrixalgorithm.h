@@ -1,22 +1,23 @@
 #ifndef __VALHALLA_THOR_MATRIXALGORITHM_H__
 #define __VALHALLA_THOR_MATRIXALGORITHM_H__
 
-#include <functional>
+#include <valhalla/baldr/graphid.h>
+#include <valhalla/baldr/graphreader.h>
+#include <valhalla/exceptions.h>
+#include <valhalla/proto/api.pb.h>
+#include <valhalla/proto/expansion.pb.h>
+#include <valhalla/sif/dynamiccost.h>
 
 #include <boost/property_tree/ptree.hpp>
 
-#include <valhalla/baldr/graphid.h>
-#include <valhalla/baldr/graphreader.h>
-#include <valhalla/proto/api.pb.h>
-// TODO(nils): should abstract more so we don't pull this in
-#include <valhalla/thor/pathalgorithm.h>
-#include <valhalla/worker.h>
+#include <functional>
 
 namespace valhalla {
 namespace thor {
 
 // Default for time distance matrix is to find all locations
 constexpr uint32_t kAllLocations = std::numeric_limits<uint32_t>::max();
+constexpr float kInvalidHeading = std::numeric_limits<float>::max();
 constexpr float kMaxCost = 99999999.9999f;
 
 /**
@@ -128,7 +129,10 @@ public:
                                                   float,
                                                   uint32_t,
                                                   float,
-                                                  const Expansion_ExpansionType)>;
+                                                  const Expansion_ExpansionType,
+                                                  const uint8_t,
+                                                  const TravelMode,
+                                                  const uint32_t)>;
   void set_track_expansion(const expansion_callback_t& expansion_callback) {
     expansion_callback_ = expansion_callback;
   }
@@ -146,18 +150,35 @@ protected:
   expansion_callback_t expansion_callback_;
 
   uint32_t max_reserved_labels_count_;
+  // prune path if path_distance exceeds this
+  uint32_t max_expansion_distance_;
 
   // if `true` clean reserved memory for edge labels
   bool clear_reserved_memory_;
 
   // on first pass, resizes all PBF sequences and defaults to 0 or ""
-  inline static void reserve_pbf_arrays(valhalla::Matrix& matrix, size_t size, uint32_t pass = 0) {
+  inline static void
+  reserve_pbf_arrays(valhalla::Matrix& matrix, size_t size, bool verbose, uint32_t pass = 0) {
     if (pass == 0) {
+
+// Yep, since 35.0 protobuf renamed `Resize` to `resize` for repeated fields.
+// https://github.com/protocolbuffers/protobuf/pull/26025
+#if PROTOBUF_VERSION < 7035000
       matrix.mutable_from_indices()->Resize(size, 0U);
       matrix.mutable_to_indices()->Resize(size, 0U);
       matrix.mutable_distances()->Resize(size, 0U);
       matrix.mutable_times()->Resize(size, 0U);
+      matrix.mutable_costs()->Resize(size, 0.f);
       matrix.mutable_second_pass()->Resize(size, false);
+#else
+      matrix.mutable_from_indices()->resize(size, 0U);
+      matrix.mutable_to_indices()->resize(size, 0U);
+      matrix.mutable_distances()->resize(size, 0U);
+      matrix.mutable_times()->resize(size, 0U);
+      matrix.mutable_costs()->resize(size, 0.f);
+      matrix.mutable_second_pass()->resize(size, false);
+#endif
+
       // repeated strings don't support Resize()
       matrix.mutable_date_times()->Reserve(size);
       matrix.mutable_time_zone_offsets()->Reserve(size);
@@ -172,6 +193,27 @@ protected:
         *time_zone_name = "";
         auto* shape = matrix.mutable_shapes()->Add();
         *shape = "";
+      }
+      if (verbose) {
+        // fill with sentinel values meaning "no data"
+
+// Yep, since 35.0 protobuf renamed `Resize` to `resize` for repeated fields.
+// https://github.com/protocolbuffers/protobuf/pull/26025
+#if PROTOBUF_VERSION < 7035000
+        matrix.mutable_begin_heading()->Resize(size, kInvalidHeading);
+        matrix.mutable_end_heading()->Resize(size, kInvalidHeading);
+        matrix.mutable_begin_lat()->Resize(size, midgard::INVALID_LL);
+        matrix.mutable_begin_lon()->Resize(size, midgard::INVALID_LL);
+        matrix.mutable_end_lat()->Resize(size, midgard::INVALID_LL);
+        matrix.mutable_end_lon()->Resize(size, midgard::INVALID_LL);
+#else
+        matrix.mutable_begin_heading()->resize(size, kInvalidHeading);
+        matrix.mutable_end_heading()->resize(size, kInvalidHeading);
+        matrix.mutable_begin_lat()->resize(size, midgard::INVALID_LL);
+        matrix.mutable_begin_lon()->resize(size, midgard::INVALID_LL);
+        matrix.mutable_end_lat()->resize(size, midgard::INVALID_LL);
+        matrix.mutable_end_lon()->resize(size, midgard::INVALID_LL);
+#endif
       }
     }
   }

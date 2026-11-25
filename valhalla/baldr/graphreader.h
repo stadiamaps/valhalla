@@ -1,26 +1,27 @@
 #pragma once
 
-#include <algorithm>
-#include <cstdint>
-#include <memory>
-#include <mutex>
-#include <string>
-#include <unordered_map>
-
-#include <boost/property_tree/ptree.hpp>
-
 #include <valhalla/baldr/graphid.h>
 #include <valhalla/baldr/graphtile.h>
 #include <valhalla/baldr/tilegetter.h>
 #include <valhalla/baldr/tilehierarchy.h>
-
 #include <valhalla/midgard/aabb2.h>
 #include <valhalla/midgard/pointll.h>
-#include <valhalla/midgard/sequence.h>
 
-#include <valhalla/proto/incidents.pb.h>
+#include <boost/property_tree/ptree_fwd.hpp>
+
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <unordered_map>
 
 namespace valhalla {
+class IncidentsTile;
+namespace midgard {
+struct tar;
+}
+
 namespace baldr {
 
 struct tile_gone_error_t : public std::runtime_error {
@@ -157,7 +158,8 @@ protected:
   inline uint32_t get_index(const GraphId& graphid) const {
     auto offset = get_offset(graphid);
     // using max value to indicate invalid
-    return offset < cache_indices_.size() ? cache_indices_[offset] : midgard::invalid<uint32_t>();
+    return offset < cache_indices_.size() ? cache_indices_[offset]
+                                          : std::numeric_limits<uint32_t>::max();
   }
 
   // The actual cached GraphTile objects
@@ -475,6 +477,15 @@ public:
   virtual graph_tile_ptr GetGraphTile(const GraphId& graphid);
 
   /**
+   * Get a copy of a tile's header without loading the tile: reads it from the
+   * mmapped extract or the header span of the file in tile_dir. Gzipped and remote
+   * tiles fall back to GetGraphTile (and thus populate the cache).
+   * @param graphid  the graphid of the tile
+   * @return the tile's header, or nullopt if the tile is not found
+   */
+  std::optional<GraphTileHeader> GetGraphTileHeader(const GraphId& graphid);
+
+  /**
    * Get a pointer to a graph tile object given a GraphId. This method also
    * supplies the current graph tile - so if the same tile is requested in
    * succession it does not have to look up the tile in the cache.
@@ -483,7 +494,7 @@ public:
    * @return graph_tile_ptr& reference to the tile parameter
    */
   graph_tile_ptr& GetGraphTile(const GraphId& graphid, graph_tile_ptr& tile) {
-    return !tile || tile->id() != graphid.Tile_Base() ? tile = GetGraphTile(graphid) : tile;
+    return !tile || tile->id() != graphid.tile_base() ? tile = GetGraphTile(graphid) : tile;
   }
 
   /**
@@ -494,7 +505,7 @@ public:
    */
   graph_tile_ptr GetGraphTile(const midgard::PointLL& pointll, const uint8_t level) {
     GraphId id = TileHierarchy::GetGraphId(pointll, level);
-    return id.Is_Valid() ? GetGraphTile(id) : nullptr;
+    return id.is_valid() ? GetGraphTile(id) : nullptr;
   }
 
   /**
@@ -521,6 +532,11 @@ public:
   virtual void Trim() {
     cache_->Trim();
   }
+
+  /**
+   * Lets downloads that failed with a retryable status be tried again
+   */
+  void ClearRetryableFailures();
 
   /**
    * Returns the maximum number of threads that can
@@ -606,7 +622,7 @@ public:
    */
   const DirectedEdge* GetOpposingEdge(const GraphId& edgeid, graph_tile_ptr& opp_tile) {
     GraphId oppedgeid = GetOpposingEdgeId(edgeid, opp_tile);
-    return oppedgeid.Is_Valid() ? opp_tile->directededge(oppedgeid) : nullptr;
+    return oppedgeid.is_valid() ? opp_tile->directededge(oppedgeid) : nullptr;
   }
 
   /**
@@ -783,7 +799,7 @@ public:
    *         the one containing edgeid
    */
   std::pair<GraphId, GraphId> GetDirectedEdgeNodes(const GraphId& edgeid, graph_tile_ptr& edge_tile) {
-    if (edge_tile && edge_tile->id().Tile_Base() == edgeid.Tile_Base()) {
+    if (edge_tile && edge_tile->id().tile_base() == edgeid.tile_base()) {
       return GetDirectedEdgeNodes(edge_tile, edge_tile->directededge(edgeid));
     } else {
       edge_tile = GetGraphTile(edgeid);
@@ -828,7 +844,7 @@ public:
    */
   GraphId edge_startnode(const GraphId& edgeid, graph_tile_ptr& tile) {
     GraphId opp_edgeid = GetOpposingEdgeId(edgeid, tile);
-    if (opp_edgeid.Is_Valid()) {
+    if (opp_edgeid.is_valid()) {
       const auto de = directededge(opp_edgeid, tile);
       if (de) {
         return de->endnode();
@@ -907,12 +923,7 @@ public:
    * Returns the location of the tile extract
    * @return  Returns the tile extract file path.
    */
-  const std::string& tile_extract() const {
-    static std::string empty_str;
-    if (tile_extract_->tiles.empty())
-      return empty_str;
-    return tile_extract_->archive->tar_file;
-  }
+  const std::string& tile_extract() const;
 
   /**
    * Returns the tilesets location whether thats a tile_dir or a tile_extract. Purely url
@@ -982,8 +993,6 @@ protected:
     uint64_t checksum;
   };
   std::shared_ptr<const tile_extract_t> tile_extract_;
-  static std::shared_ptr<const GraphReader::tile_extract_t>
-  get_extract_instance(const boost::property_tree::ptree& pt);
 
   // Information about where the tiles are kept
   const std::string tile_dir_;
@@ -992,18 +1001,56 @@ protected:
   std::unique_ptr<tile_getter_t> tile_getter_;
   const size_t max_concurrent_users_;
   const std::string tile_url_;
+  const std::filesystem::path url_id_txt_path_;
+  const bool is_tar_url_;
+  // tileset build id recorded in id.txt; unset until the first downloaded tile establishes it
+  const std::optional<uint64_t> url_id_txt_checksum_;
 
-  std::mutex _404s_lock;
-  std::unordered_set<GraphId> _404s;
+  // for remote tar's we grab the index.bin when loading the remote_tar_offsets
+  // so we know all tiles' offset & size
+  struct remote_tile_position_t {
+    uint64_t offset;
+    uint64_t size;
+  };
+  using remote_tar_offsets_t = std::unordered_map<GraphId, remote_tile_position_t>;
+  remote_tar_offsets_t remote_tar_offsets_;
+  // loads the remote index.bin into remote_tar_offsets_
+  void load_remote_tar_offsets();
+
+  // failed downloads and their HTTP status
+  std::mutex failed_downloads_lock_;
+  std::unordered_map<GraphId, long> failed_downloads_;
 
   std::unique_ptr<TileCache> cache_;
 
   bool enable_incidents_;
+
+  /**
+   * Loads the tile_dir/id.txt, validates its URL matches the configured one, and returns the build
+   * id on the 2nd line.
+   *
+   * @param id_txt_path the filesystem::path to the id.txt
+   * @param tile_url    the tile url in the config to match to the one in id.txt
+   * @return the build id on the 2nd line of id.txt, or nullopt if id.txt has none yet
+   */
+  std::optional<uint64_t> load_id_txt_checksum(const std::filesystem::path& id_txt_path,
+                                               const std::string& tile_url);
 };
 
-// Given the Location relation, return the full metadata
-const valhalla::IncidentsTile::Metadata&
-getIncidentMetadata(const std::shared_ptr<const valhalla::IncidentsTile>& tile,
-                    const valhalla::IncidentsTile::Location& incident_location);
+class LimitedGraphReader {
+public:
+  LimitedGraphReader(GraphReader& reader) : reader_(reader) {
+  }
+
+  /**
+   * Get a pointer to a graph tile object given a GraphId.
+   * @param graphid  the graphid of the tile
+   * @return GraphTile* a pointer to the graph tile
+   */
+  virtual graph_tile_ptr GetGraphTile(const GraphId& graphid);
+
+protected:
+  GraphReader& reader_;
+};
 } // namespace baldr
 } // namespace valhalla

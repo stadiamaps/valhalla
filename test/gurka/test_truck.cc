@@ -1,5 +1,7 @@
 #include "gurka.h"
 #include "test.h"
+#include "valhalla/worker.h"
+
 #include <gtest/gtest.h>
 
 using namespace valhalla;
@@ -103,7 +105,7 @@ TEST(TruckSpeed, MaxTruckSpeed) {
                         {"/date_time/value", "current"}});
 
   test::customize_live_traffic_data(map.config, [&](baldr::GraphReader& reader,
-                                                    baldr::TrafficTile& tile, u_int32_t index,
+                                                    baldr::TrafficTile& tile, uint32_t index,
                                                     valhalla::baldr::TrafficSpeed* traffic_speed) {
     baldr::GraphId tile_id(tile.header->tile_id);
     auto AB = gurka::findEdge(reader, map.nodes, "AB", "B", tile_id);
@@ -113,7 +115,7 @@ TEST(TruckSpeed, MaxTruckSpeed) {
       traffic_speed->breakpoint1 = 255;
       traffic_speed->encoded_speed1 = 140 >> 1;
     } else {
-      traffic_speed->overall_encoded_speed = UNKNOWN_TRAFFIC_SPEED_RAW - 1;
+      traffic_speed->overall_encoded_speed = baldr::UNKNOWN_TRAFFIC_SPEED_RAW - 1;
     }
   });
 
@@ -124,7 +126,7 @@ TEST(TruckSpeed, MaxTruckSpeed) {
                         {"/costing_options/truck/speed_types/0", "current"}});
 
   test::customize_live_traffic_data(map.config, [&](baldr::GraphReader& reader,
-                                                    baldr::TrafficTile& tile, u_int32_t index,
+                                                    baldr::TrafficTile& tile, uint32_t index,
                                                     valhalla::baldr::TrafficSpeed* traffic_speed) {
     baldr::GraphId tile_id(tile.header->tile_id);
     auto AB = gurka::findEdge(reader, map.nodes, "AB", "B", tile_id);
@@ -134,7 +136,7 @@ TEST(TruckSpeed, MaxTruckSpeed) {
       traffic_speed->breakpoint1 = 255;
       traffic_speed->encoded_speed1 = 50 >> 1;
     } else {
-      traffic_speed->overall_encoded_speed = UNKNOWN_TRAFFIC_SPEED_RAW - 1;
+      traffic_speed->overall_encoded_speed = baldr::UNKNOWN_TRAFFIC_SPEED_RAW - 1;
     }
   });
 
@@ -302,7 +304,7 @@ TEST(Standalone, TruckSpeeds) {
   gurka::map map = gurka::buildtiles(layout, ways, {}, {}, "test/data/truck_speed");
 
   baldr::GraphReader reader(map.config.get_child("mjolnir"));
-  const DirectedEdge *de_fwd, *de_rev, *de_both_1, *de_both_2;
+  const baldr::DirectedEdge *de_fwd, *de_rev, *de_both_1, *de_both_2;
   std::tie(std::ignore, de_fwd) = gurka::findEdgeByNodes(reader, layout, "A", "B");
   std::tie(std::ignore, de_rev) = gurka::findEdgeByNodes(reader, layout, "C", "B");
   std::tie(std::ignore, de_both_1) = gurka::findEdgeByNodes(reader, layout, "C", "D");
@@ -346,4 +348,76 @@ TEST(Standalone, UseTruckRoute) {
 
   gurka::assert::raw::expect_path(default_route, {"AB", "BC"});
   gurka::assert::raw::expect_path(use_truck_route, {"AE", "ED", "CD"});
+}
+
+TEST(Standalone, LowRoadClassPenalty_1) {
+  constexpr double gridsize = 100;
+
+  // start and end of route on tertiary,
+  // the route via unclassified roads is much
+  // shorter. Make sure the unclassified path is chosen
+  // despite low_class_penalty.
+  const std::string ascii_map = R"(
+
+      A1B-G-H-I-J-K2L
+      |             |
+      |             |
+      |             |
+      |             |
+      |             |
+      |             |
+      |             |
+      |             |
+      E-------------F
+    )";
+
+  const gurka::ways ways = {
+      {"AB", {{"highway", "residential"}}},  {"BG", {{"highway", "residential"}}},
+      {"GH", {{"highway", "residential"}}},  {"HI", {{"highway", "residential"}}},
+      {"IJ", {{"highway", "residential"}}},  {"JK", {{"highway", "residential"}}},
+      {"KL", {{"highway", "residential"}}},  {"LF", {{"highway", "unclassified"}}},
+      {"AE", {{"highway", "unclassified"}}}, {"EF", {{"highway", "unclassified"}}},
+  };
+
+  const auto layout = gurka::detail::map_to_coordinates(ascii_map, gridsize);
+  gurka::map map = gurka::buildtiles(layout, ways, {}, {}, "test/data/low_class_penalty_1");
+
+  valhalla::Api route = gurka::do_action(valhalla::Options::route, map, {"1", "2"}, "truck");
+
+  gurka::assert::raw::expect_path(route, {"AB", "BG", "GH", "HI", "IJ", "JK", "KL"});
+}
+
+/**
+ * Similar to the first example, but make the detour shorter and therefore more favorable.
+ */
+TEST(Standalone, LowRoadClassPenalty_2) {
+  constexpr double gridsize = 100;
+
+  const std::string ascii_map = R"(
+
+      A-B-G-H-I-J-K-L
+      1             2
+      C             D
+      |             |
+      |             |
+      |             |
+      E-------------F
+    )";
+
+  const gurka::ways ways = {
+      {"AB", {{"highway", "residential"}}},  {"BG", {{"highway", "residential"}}},
+      {"GH", {{"highway", "residential"}}},  {"HI", {{"highway", "residential"}}},
+      {"IJ", {{"highway", "residential"}}},  {"JK", {{"highway", "residential"}}},
+      {"KL", {{"highway", "residential"}}},  {"LD", {{"highway", "unclassified"}}},
+      {"AC", {{"highway", "unclassified"}}}, {"CE", {{"highway", "unclassified"}}},
+      {"DF", {{"highway", "unclassified"}}}, {"EF", {{"highway", "unclassified"}}},
+  };
+
+  const auto layout = gurka::detail::map_to_coordinates(ascii_map, gridsize);
+  gurka::map map = gurka::buildtiles(layout, ways, {}, {}, "test/data/low_class_penalty_2");
+
+  valhalla::Api route = gurka::do_action(valhalla::Options::route, map, {"1", "2"}, "truck");
+
+  // should avoid the residential path here
+  gurka::assert::raw::expect_path(route, {"AC", "CE", "EF", "DF", "LD"});
 }

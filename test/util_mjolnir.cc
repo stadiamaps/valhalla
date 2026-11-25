@@ -1,13 +1,12 @@
-#include <filesystem>
-#include <sstream>
-
-#include <boost/property_tree/ptree.hpp>
-
 #include "baldr/graphid.h"
 #include "baldr/rapidjson_utils.h"
 #include "mjolnir/util.h"
 
-#include "test.h"
+#include <boost/property_tree/ptree.hpp>
+#include <gtest/gtest.h>
+
+#include <filesystem>
+#include <sstream>
 
 #if !defined(VALHALLA_SOURCE_DIR)
 #define VALHALLA_SOURCE_DIR
@@ -75,6 +74,24 @@ TEST(UtilMjolnir, NonEmptyTileManifestToString) {
   }
   // Only one element is present: vector/array access of this tree child is not possible.
   EXPECT_EQ(count, 1);
+}
+
+TEST(UtilMjolnir, GetTagTokensStringDelim) {
+  using valhalla::mjolnir::GetTagTokens;
+  const std::string delim = " - ";
+  EXPECT_EQ(GetTagTokens("", delim), std::vector<std::string>{});
+  EXPECT_EQ(GetTagTokens(" - ", delim), std::vector<std::string>{""});
+  EXPECT_EQ(GetTagTokens("Chaussée de Gand", delim), std::vector<std::string>{"Chaussée de Gand"});
+  EXPECT_EQ(GetTagTokens("Chaussée de Gand - Steenweg op Gent", delim),
+            (std::vector<std::string>{"Chaussée de Gand", "Steenweg op Gent"}));
+  EXPECT_EQ(GetTagTokens("a - b - c", delim), (std::vector<std::string>{"a", "b", "c"}));
+  // leading and intermediate empty tokens are kept, trailing ones are dropped
+  EXPECT_EQ(GetTagTokens(" - a", delim), (std::vector<std::string>{"", "a"}));
+  EXPECT_EQ(GetTagTokens("a - ", delim), std::vector<std::string>{"a"});
+  EXPECT_EQ(GetTagTokens("a -  - b", delim), (std::vector<std::string>{"a", "", "b"}));
+  // delimiter must match exactly
+  EXPECT_EQ(GetTagTokens("a-b", delim), std::vector<std::string>{"a-b"});
+  EXPECT_EQ(GetTagTokens("a / b", " / "), (std::vector<std::string>{"a", "b"}));
 }
 
 TEST(UtilMjolnir, TileManifestLogToFile) {

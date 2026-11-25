@@ -1,7 +1,9 @@
 #include "baldr/rapidjson_utils.h"
 #include "gurka.h"
-#include <boost/format.hpp>
+
 #include <gtest/gtest.h>
+
+#include <format>
 
 using namespace valhalla;
 
@@ -256,12 +258,13 @@ TEST(Standalone, HeadingNumber2CrossRoadAuto) {
               << "FAILED at step " << steps << ", intersection " << intersection;
 
           if (json["routes"][0]["legs"][0]["steps"][steps]["intersections"][intersection].HasMember(
-                  "bearing"))
+                  "bearing")) {
             // All bearings have the same direction which is 90
             EXPECT_EQ(json["routes"][0]["legs"][0]["steps"][steps]["intersections"][intersection]
                           ["bearing"][out_index]
                               .GetInt(),
                       90);
+          }
         }
 
         // Validate `in` edge indexes and headings.
@@ -274,12 +277,13 @@ TEST(Standalone, HeadingNumber2CrossRoadAuto) {
               << "FAILED at step " << steps << ", intersection " << intersection;
 
           if (json["routes"][0]["legs"][0]["steps"][steps]["intersections"][intersection].HasMember(
-                  "bearings"))
+                  "bearings")) {
             // All bearings have the same direction which is 270
             EXPECT_EQ(json["routes"][0]["legs"][0]["steps"][steps]["intersections"][intersection]
                           ["bearings"][in_index]
                               .GetInt(),
                       270);
+          }
         }
 
         EXPECT_EQ(expected_headings[index++], json["routes"][0]["legs"][0]["steps"][steps]
@@ -557,12 +561,10 @@ protected:
   rapidjson::Document json_request(const std::string& from,
                                    const std::string& to,
                                    const std::string& language = "en-US") {
-    const std::string& request =
-        (boost::format(
-             R"({"locations":[{"lat":%s,"lon":%s},{"lat":%s,"lon":%s}],"costing":"auto","voice_instructions":true,"language":"%s"})") %
-         std::to_string(map.nodes.at(from).lat()) % std::to_string(map.nodes.at(from).lng()) %
-         std::to_string(map.nodes.at(to).lat()) % std::to_string(map.nodes.at(to).lng()) % language)
-            .str();
+    const std::string& request = std::format(
+        R"({{"locations":[{{"lat":{:.6f},"lon":{:.6f}}},{{"lat":{:.6f},"lon":{:.6f}}}],"costing":"auto","voice_instructions":true,"language":"{}"}})",
+        map.nodes.at(from).lat(), map.nodes.at(from).lng(), map.nodes.at(to).lat(),
+        map.nodes.at(to).lng(), language);
     auto result = gurka::do_action(valhalla::Options::route, map, request);
     return gurka::convert_to_json(result, Options::Format::Options_Format_osrm);
   }
@@ -573,14 +575,15 @@ gurka::map VoiceInstructions::map = {};
 TEST_F(VoiceInstructions, VoiceInstructionsPresent) {
   auto json = json_request("A", "F");
   auto steps = json["routes"][0]["legs"][0]["steps"].GetArray();
+  ASSERT_TRUE(steps.Size() > 0);
   // Validate that each step (except the last one) has voiceInstructions with announcement,
   // ssmlAnnouncement and distanceAlongGeometry
-  for (int step = 0; step < steps.Size() - 1; ++step) {
+  for (uint32_t step = 0; step < steps.Size() - 1; ++step) {
     ASSERT_TRUE(steps[step].HasMember("voiceInstructions"));
     ASSERT_TRUE(steps[step]["voiceInstructions"].IsArray());
 
     EXPECT_GT(steps[step]["voiceInstructions"].Size(), 0);
-    for (int instr = 0; instr < steps[step]["voiceInstructions"].GetArray().Size(); ++instr) {
+    for (uint32_t instr = 0; instr < steps[step]["voiceInstructions"].GetArray().Size(); ++instr) {
       ASSERT_TRUE(steps[step]["voiceInstructions"][instr].HasMember("announcement"));
       ASSERT_TRUE(steps[step]["voiceInstructions"][instr].HasMember("ssmlAnnouncement"));
       ASSERT_TRUE(steps[step]["voiceInstructions"][instr].HasMember("distanceAlongGeometry"));
@@ -700,7 +703,7 @@ TEST_F(VoiceInstructions, DefaultVoiceLocalePresent) {
   auto json = json_request("A", "F");
   auto routes = json["routes"].GetArray();
   // Validate that each route has the default voiceLocale
-  for (int route = 0; route < routes.Size(); ++route) {
+  for (uint32_t route = 0; route < routes.Size(); ++route) {
     ASSERT_TRUE(routes[route].HasMember("voiceLocale"));
     EXPECT_STREQ(routes[route]["voiceLocale"].GetString(), "en-US");
   }
@@ -710,7 +713,7 @@ TEST_F(VoiceInstructions, VoiceLocalePresent) {
   auto json = json_request("A", "F", "de-DE");
   auto routes = json["routes"].GetArray();
   // Validate that each route has the voiceLocale from the options
-  for (int route = 0; route < routes.Size(); ++route) {
+  for (uint32_t route = 0; route < routes.Size(); ++route) {
     ASSERT_TRUE(routes[route].HasMember("voiceLocale"));
     EXPECT_STREQ(routes[route]["voiceLocale"].GetString(), "de-DE");
   }
@@ -753,24 +756,23 @@ TEST(Standalone, BannerInstructions) {
 
   auto from = "A";
   auto to = "D";
-  const std::string& request =
-      (boost::format(
-           R"({"locations":[{"lat":%s,"lon":%s},{"lat":%s,"lon":%s}],"costing":"auto","banner_instructions":true})") %
-       std::to_string(map.nodes.at(from).lat()) % std::to_string(map.nodes.at(from).lng()) %
-       std::to_string(map.nodes.at(to).lat()) % std::to_string(map.nodes.at(to).lng()))
-          .str();
+  const std::string& request = std::format(
+      R"({{"locations":[{{"lat":{:.6f},"lon":{:.6f}}},{{"lat":{:.6f},"lon":{:.6f}}}],"costing":"auto","banner_instructions":true}})",
+      map.nodes.at(from).lat(), map.nodes.at(from).lng(), map.nodes.at(to).lat(),
+      map.nodes.at(to).lng());
   auto result = gurka::do_action(valhalla::Options::route, map, request);
 
   auto json = gurka::convert_to_json(result, Options::Format::Options_Format_osrm);
 
   auto steps = json["routes"][0]["legs"][0]["steps"].GetArray();
+  ASSERT_TRUE(steps.Size() > 0);
 
   // Validate that each step (except the last one) has bannerInstructions with primary
-  for (int step = 0; step < steps.Size() - 1; ++step) {
+  for (uint32_t step = 0; step < steps.Size() - 1; ++step) {
     ASSERT_TRUE(steps[step].HasMember("bannerInstructions"));
     ASSERT_TRUE(steps[step]["bannerInstructions"].IsArray());
     EXPECT_GT(steps[step]["bannerInstructions"].GetArray().Size(), 0);
-    for (int instr = 0; instr < steps[step]["bannerInstructions"].GetArray().Size(); ++instr) {
+    for (uint32_t instr = 0; instr < steps[step]["bannerInstructions"].GetArray().Size(); ++instr) {
       ASSERT_TRUE(steps[step]["bannerInstructions"][instr].HasMember("distanceAlongGeometry"));
       ASSERT_TRUE(steps[step]["bannerInstructions"][instr].HasMember("primary"));
       ASSERT_TRUE(steps[step]["bannerInstructions"][instr]["primary"].HasMember("type"));
@@ -862,7 +864,7 @@ TEST(Standalone, BannerInstructions) {
   ASSERT_TRUE(sub_0.HasMember("components"));
   ASSERT_TRUE(sub_0["components"].IsArray());
   EXPECT_EQ(sub_0["components"].GetArray().Size(), 2);
-  for (int component = 0; component < sub_0["components"].GetArray().Size(); ++component) {
+  for (uint32_t component = 0; component < sub_0["components"].GetArray().Size(); ++component) {
     EXPECT_STREQ(sub_0["components"][component]["type"].GetString(), "lane");
     ASSERT_TRUE(sub_0["components"][component]["directions"].IsArray());
   }
@@ -916,7 +918,7 @@ TEST(Standalone, BannerInstructions) {
   ASSERT_TRUE(sub_1.HasMember("components"));
   ASSERT_TRUE(sub_1["components"].IsArray());
   EXPECT_EQ(sub_1["components"].GetArray().Size(), 2);
-  for (int component = 0; component < sub_1["components"].GetArray().Size(); ++component) {
+  for (uint32_t component = 0; component < sub_1["components"].GetArray().Size(); ++component) {
     EXPECT_STREQ(sub_1["components"][component]["type"].GetString(), "lane");
     ASSERT_TRUE(sub_1["components"][component]["directions"].IsArray());
   }
@@ -926,10 +928,17 @@ TEST(Standalone, BannerInstructions) {
   EXPECT_STREQ(sub_1["components"][1]["directions"][0].GetString(), "right");
   ASSERT_FALSE(sub_1["components"][1]["active"].GetBool());
 
-  // validate third step's primary instructions
-  auto primary_2 = steps[2]["bannerInstructions"][0]["primary"].GetObject();
-  EXPECT_STREQ(primary_2["type"].GetString(), "arrive");
-  EXPECT_STREQ(primary_2["text"].GetString(), "You have arrived at your destination.");
+  // The final approach shows an advance banner before the arrival banner.
+  auto arrival_banners = steps[2]["bannerInstructions"].GetArray();
+  ASSERT_EQ(arrival_banners.Size(), 2);
+  EXPECT_GT(arrival_banners[0]["distanceAlongGeometry"].GetFloat(),
+            arrival_banners[1]["distanceAlongGeometry"].GetFloat());
+  EXPECT_STREQ(arrival_banners[0]["primary"]["type"].GetString(), "arrive");
+  EXPECT_STREQ(arrival_banners[0]["primary"]["text"].GetString(),
+               "You will arrive at your destination.");
+  EXPECT_STREQ(arrival_banners[1]["primary"]["type"].GetString(), "arrive");
+  EXPECT_STREQ(arrival_banners[1]["primary"]["text"].GetString(),
+               "You have arrived at your destination.");
 }
 
 TEST(Standalone, BannerInstructionsRoundabout) {
@@ -966,24 +975,23 @@ TEST(Standalone, BannerInstructionsRoundabout) {
 
   auto from = "A";
   auto to = "B";
-  const std::string& request =
-      (boost::format(
-           R"({"locations":[{"lat":%s,"lon":%s},{"lat":%s,"lon":%s}],"costing":"auto","banner_instructions":true})") %
-       std::to_string(map.nodes.at(from).lat()) % std::to_string(map.nodes.at(from).lng()) %
-       std::to_string(map.nodes.at(to).lat()) % std::to_string(map.nodes.at(to).lng()))
-          .str();
+  const std::string& request = std::format(
+      R"({{"locations":[{{"lat":{:.6f},"lon":{:.6f}}},{{"lat":{:.6f},"lon":{:.6f}}}],"costing":"auto","banner_instructions":true}})",
+      map.nodes.at(from).lat(), map.nodes.at(from).lng(), map.nodes.at(to).lat(),
+      map.nodes.at(to).lng());
   auto result = gurka::do_action(valhalla::Options::route, map, request);
 
   auto json = gurka::convert_to_json(result, Options::Format::Options_Format_osrm);
 
   auto steps = json["routes"][0]["legs"][0]["steps"].GetArray();
+  ASSERT_TRUE(steps.Size() > 0);
 
   // Validate that each step (except the last one) has bannerInstructions with primary
-  for (int step = 0; step < steps.Size() - 1; ++step) {
+  for (uint32_t step = 0; step < steps.Size() - 1; ++step) {
     ASSERT_TRUE(steps[step].HasMember("bannerInstructions"));
     ASSERT_TRUE(steps[step]["bannerInstructions"].IsArray());
     EXPECT_GT(steps[step]["bannerInstructions"].GetArray().Size(), 0);
-    for (int instr = 0; instr < steps[step]["bannerInstructions"].GetArray().Size(); ++instr) {
+    for (uint32_t instr = 0; instr < steps[step]["bannerInstructions"].GetArray().Size(); ++instr) {
       ASSERT_TRUE(steps[step]["bannerInstructions"][instr].HasMember("distanceAlongGeometry"));
       ASSERT_TRUE(steps[step]["bannerInstructions"][instr].HasMember("primary"));
       ASSERT_TRUE(steps[step]["bannerInstructions"][instr]["primary"].HasMember("type"));
@@ -1066,12 +1074,10 @@ protected:
   }
 
   rapidjson::Document json_request(const std::string& from, const std::string& to) {
-    const std::string& request =
-        (boost::format(
-             R"({"locations":[{"lat":%s,"lon":%s},{"lat":%s,"lon":%s}],"costing":"auto","banner_instructions":true})") %
-         std::to_string(map.nodes.at(from).lat()) % std::to_string(map.nodes.at(from).lng()) %
-         std::to_string(map.nodes.at(to).lat()) % std::to_string(map.nodes.at(to).lng()))
-            .str();
+    const std::string& request = std::format(
+        R"({{"locations":[{{"lat":{:.6f},"lon":{:.6f}}},{{"lat":{:.6f},"lon":{:.6f}}}],"costing":"auto","banner_instructions":true}})",
+        map.nodes.at(from).lat(), map.nodes.at(from).lng(), map.nodes.at(to).lat(),
+        map.nodes.at(to).lng());
     auto result = gurka::do_action(valhalla::Options::route, map, request);
     return gurka::convert_to_json(result, Options::Format::Options_Format_osrm);
   }

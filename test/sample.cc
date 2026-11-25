@@ -1,18 +1,21 @@
 #include "skadi/sample.h"
+#include "baldr/compression_utils.h"
+#include "midgard/pointll.h"
+#include "midgard/sequence.h"
 #include "pixels.h"
 
-#include "baldr/compression_utils.h"
-#include "midgard/sequence.h"
-#include "midgard/util.h"
+#include <gtest/gtest.h>
+#ifdef ENABLE_LZ4
+#include <lz4frame.h>
+#endif
 
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <list>
-#include <lz4frame.h>
-
-#include "test.h"
 
 using namespace valhalla;
+using namespace valhalla::midgard;
 
 namespace {
 
@@ -49,7 +52,7 @@ TEST(Sample, create_tile) {
   // input for gzip
   auto src_func = [&tile](z_stream& s) -> int {
     s.next_in = static_cast<Byte*>(static_cast<void*>(tile.data()));
-    s.avail_in = static_cast<unsigned int>(tile.size() * sizeof(decltype(tile)::value_type));
+    s.avail_in = static_cast<unsigned int>(tile.size() * sizeof(int16_t));
     return Z_FINISH;
   };
 
@@ -70,6 +73,7 @@ TEST(Sample, create_tile) {
   // gzip it
   EXPECT_TRUE(baldr::deflate(src_func, dst_func)) << "Can't write gzipped elevation tile";
 
+#ifdef ENABLE_LZ4
   // lz4 it
   std::vector<char> lz4_buffer(tile.size() * sizeof(int16_t) * 2, 0);
   size_t out_bytes =
@@ -79,6 +83,7 @@ TEST(Sample, create_tile) {
 
   std::ofstream lzfile("test/data/samplelz4/N40/N40W077.hgt.lz4", std::ios::binary | std::ios::trunc);
   lzfile.write(static_cast<const char*>(static_cast<void*>(lz4_buffer.data())), out_bytes);
+#endif
 }
 
 void _get(const std::string& location) {
@@ -114,9 +119,11 @@ TEST(Sample, getgz) {
   _get("test/data/samplegz");
 };
 
+#ifdef ENABLE_LZ4
 TEST(Sample, getlz4) {
   _get("test/data/samplelz4");
 };
+#endif
 
 struct testable_sample_t : public skadi::sample {
   testable_sample_t(const std::string& dir) : sample(dir) {
@@ -141,7 +148,7 @@ struct testable_sample_t : public skadi::sample {
 };
 
 TEST(Sample, edges) {
-  testable_sample_t s("/dev/null");
+  testable_sample_t s("");
 
   // check 4 pixels
   auto n = .5f / 3600;
@@ -208,45 +215,29 @@ TEST(Sample, store) {
   for (const auto& p : pixels) {
     tile[p.first] = p.second;
   }
-  std::ofstream file("test/data/sample/N00/N00E005.hgt", std::ios::binary | std::ios::trunc);
-  file.write(static_cast<const char*>(static_cast<void*>(tile.data())),
-             sizeof(int16_t) * tile.size());
+  {
+    std::ofstream file("test/data/sample/N00/N00E005.hgt", std::ios::binary | std::ios::trunc);
+    file.write(static_cast<const char*>(static_cast<void*>(tile.data())),
+               sizeof(int16_t) * tile.size());
+  }
 
-  // input for gzip
-  auto src_func = [&tile](z_stream& s) -> int {
-    s.next_in = static_cast<Byte*>(static_cast<void*>(tile.data()));
-    s.avail_in = static_cast<unsigned int>(tile.size() * sizeof(decltype(tile)::value_type));
-    return Z_FINISH;
-  };
+  {
+    testable_sample_t s("test/data/sample");
 
-  // output for gzip
-  std::vector<char> dst_buffer(13000, 0);
-  std::ofstream gzfile("test/data/samplegz/N00/N00E005.hgt.gz", std::ios::binary | std::ios::trunc);
-  auto dst_func = [&dst_buffer, &gzfile](z_stream& s) -> void {
-    // move these bytes to their final resting place
-    auto chunk = s.total_out - gzfile.tellp();
-    gzfile.write(static_cast<const char*>(static_cast<void*>(dst_buffer.data())), chunk);
-    // if more input is coming
-    if (s.avail_in > 0) {
-      s.next_out = static_cast<Byte*>(static_cast<void*>(dst_buffer.data()));
-      s.avail_out = dst_buffer.size();
-    }
-  };
+    EXPECT_TRUE(s.store("/N00/N00E005.hgt", {}));
+    EXPECT_TRUE(s.store("/N00/N00E005.hgt.gz", {}));
 
-  testable_sample_t s("test/data/sample");
+    // can be archived only with ".gz" format.
+    EXPECT_FALSE(s.store("/N00/N00E005.hgt.tar", {}));
 
-  EXPECT_TRUE(s.store("/N00/N00E005.hgt", {}));
-  EXPECT_TRUE(s.store("/N00/N00E005.hgt.gz", {}));
+    // empty file
+    EXPECT_FALSE(s.store("/N00/N00E009.hgt", {}));
+  } // destroy s (drops mmaps) before removing the files on Windows
 
-  // can be archived only with ".gz" format.
-  EXPECT_FALSE(s.store("/N00/N00E005.hgt.tar", {}));
-
-  // empty file
-  EXPECT_FALSE(s.store("/N00/N00E009.hgt", {}));
-
-  filesystem::remove("test/data/sample/N00/N00E009.hgt");
-  filesystem::remove("test/data/sample/N00/N00E005.hgt");
-  filesystem::remove("test/data/sample/N00/N00E005.hgt.gz");
+  std::error_code ec;
+  std::filesystem::remove("test/data/sample/N00/N00E009.hgt", ec);
+  std::filesystem::remove("test/data/sample/N00/N00E005.hgt", ec);
+  std::filesystem::remove("test/data/sample/N00/N00E005.hgt.gz", ec);
 }
 
 } // namespace

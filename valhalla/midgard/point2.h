@@ -1,13 +1,13 @@
 #pragma once
 
+#include <valhalla/midgard/util_core.h>
+
 #include <cmath>
 #include <cstring>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
-
-#include <valhalla/midgard/util_core.h>
 
 namespace {
 constexpr float LL_EPSILON = .00002f;
@@ -105,7 +105,7 @@ public:
    * @return  Returns the distance between this point and p.
    */
   PrecisionT Distance(const PointXY<PrecisionT>& p) const {
-    return sqrtf(DistanceSquared(p));
+    return std::sqrt(DistanceSquared(p));
   }
 
   /**

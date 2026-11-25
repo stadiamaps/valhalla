@@ -4,16 +4,10 @@
 set -o errexit -o pipefail -o nounset
 
 readonly base=$(git merge-base refs/remotes/origin/master HEAD)
-readonly build_dir=build
-
-readonly CLANG_TIDY_VERSION=7.0.0
+readonly concurrency=${1:-$(nproc)}
+readonly build_dir=${2:-build}
 
 source scripts/bash_utils.sh
-setup_mason
-
-./mason/mason install clang-tidy $CLANG_TIDY_VERSION
-./mason/mason link clang-tidy $CLANG_TIDY_VERSION
-readonly CLANG_TIDY=$(pwd)/mason_packages/.link/bin/clang-tidy
 
 # Backup compile_commands and filter out protobuf generated .pb.cc files
 readonly tidy_dir=.tidytmp
@@ -28,6 +22,8 @@ modified_filepaths=()
 # We set the Internal Field Separator to nothing and read line by line.
 while IFS='' read -r line
 do
+  # the rust bindings are built by cargo, so they aren't in compile_commands.json
+  [[ "$line" == src/bindings/rust/* ]] && continue
   absolute_filepath=$(realpath "$line")
   if [[ ${absolute_filepath: -2} == "cc" || ${absolute_filepath: -2} == "." ]]; then
     echo "Detected changes in $absolute_filepath"
@@ -42,17 +38,19 @@ if [ ${#modified_filepaths[@]} = 0 ]; then
 fi
 
 readonly FIX_ERRORS="-fix -fix-errors"
+py=$(setup_python)
+install_py_packages $py
+CLANG_TIDY_CMD="${py} -c \"from clang_tidy import clang_tidy; clang_tidy()\""
 
-readonly num_jobs="${1:-$(nproc)}"
 # -m specifies that `parallel` should distribute the arguments evenly across the executing jobs.
 # -p Tells clang-tidy where to find the `compile_commands.json`.
 # `{}` specifies where `parallel` adds the command-line arguments.
 # `:::` separates the command `parallel` should execute from the arguments it should pass to the commands.
 parallel \
   -m \
-  -j $num_jobs \
+  -j ${concurrency} \
   --halt-on-error now,fail=1 \
-  ${CLANG_TIDY} \
+  "${CLANG_TIDY_CMD}" \
   -p $tidy_dir \
   -header-filter "^$(pwd)/valhalla/[^/]+$" \
   ${FIX_ERRORS} \

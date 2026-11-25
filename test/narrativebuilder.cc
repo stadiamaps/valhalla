@@ -1,25 +1,23 @@
-#include <cstdint>
-
+#include "odin/narrativebuilder.h"
 #include "baldr/verbal_text_formatter_factory.h"
-
 #include "odin/enhancedtrippath.h"
 #include "odin/maneuver.h"
 #include "odin/markup_formatter.h"
 #include "odin/narrative_builder_factory.h"
 #include "odin/narrative_dictionary.h"
-#include "odin/narrativebuilder.h"
-#include "odin/sign.h"
 #include "odin/signs.h"
 #include "odin/util.h"
-
 #include "proto/common.pb.h"
 #include "proto/directions.pb.h"
 #include "proto/trip.pb.h"
 
-#include "test.h"
+#include <gtest/gtest.h>
+
+#include <cstdint>
 
 using namespace std;
 using namespace valhalla;
+using namespace valhalla::baldr;
 using namespace valhalla::odin;
 
 namespace {
@@ -2549,11 +2547,11 @@ void PopulateTransitManeuverList_1_stop_count_1(std::list<Maneuver>& maneuvers,
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation,
                              "s-dr5rkw4r8c-atlanticav~barclaysctr<r31n", "Atlantic Av - Barclays Ctr",
-                             "2016-05-17T08:08-04:00", "", 0, 0.0f, 0.0f)));
+                             "2016-05-17T10:08-04:00", "", 0, 0.0f, 0.0f)));
 
   maneuver.InsertTransitStop(
       std::move(GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5rkmp4s9-unionst<r32n",
-                                       "Union St", "", "2016-05-17T08:06-04:00", 0, 0.0f, 0.0f)));
+                                       "Union St", "", "2016-05-17T10:06-04:00", 0, 0.0f, 0.0f)));
 }
 
 void PopulateTransitManeuverList_1_stop_count_2(std::list<Maneuver>& maneuvers,
@@ -2577,16 +2575,16 @@ void PopulateTransitManeuverList_1_stop_count_2(std::list<Maneuver>& maneuvers,
   // Insert the transit stops in reverse order (end to begin of line)
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5rsr9wyg-14st~unionsq<r20s",
-                             "14 St - Union Sq", "2016-05-17T08:08-04:00", "2016-05-17T08:11-04:00",
+                             "14 St - Union Sq", "2016-05-17T10:08-04:00", "2016-05-17T10:11-04:00",
                              0, 0.0f, 0.0f)));
 
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5ru2dx73-23st<r19s", "23 St",
-                             "2016-05-17T08:07-04:00", "2016-05-17T08:07-04:00", 0, 0.0f, 0.0f)));
+                             "2016-05-17T10:07-04:00", "2016-05-17T10:07-04:00", 0, 0.0f, 0.0f)));
 
   maneuver.InsertTransitStop(
       std::move(GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5ru37pdw-28st<r18s",
-                                       "28 St", "", "2016-05-17T08:05-04:00", 0, 0.0f, 0.0f)));
+                                       "28 St", "", "2016-05-17T10:05-04:00", 0, 0.0f, 0.0f)));
 }
 
 void PopulateTransitManeuverList_1_stop_count_4(std::list<Maneuver>& maneuvers,
@@ -2609,20 +2607,20 @@ void PopulateTransitManeuverList_1_stop_count_4(std::list<Maneuver>& maneuvers,
   // Insert the transit stops in reverse order (end to begin of line)
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5ru65x7v-34st~heraldsq<r17n",
-                             "34 St - Herald Sq", "2016-03-29T08:08-04:00", "", 1, 0.0f, 0.0f)));
+                             "34 St - Herald Sq", "2016-03-29T10:08-04:00", "", 1, 0.0f, 0.0f)));
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5ru37pdw-28st<r18n", "28 St",
-                             "2016-03-29T08:07-04:00", "2016-03-29T08:07-04:00", 1, 0.0f, 0.0f)));
+                             "2016-03-29T10:07-04:00", "2016-03-29T10:07-04:00", 1, 0.0f, 0.0f)));
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5ru2dx73-23st<r19n", "23 St",
-                             "2016-03-29T08:06-04:00", "2016-03-29T08:06-04:00", 1, 0.0f, 0.0f)));
+                             "2016-03-29T10:06-04:00", "2016-03-29T10:06-04:00", 1, 0.0f, 0.0f)));
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5rsr9wyg-14st~unionsq<r20n",
-                             "14 St - Union Sq", "2016-03-29T08:04-04:00", "2016-03-29T08:04-04:00",
+                             "14 St - Union Sq", "2016-03-29T10:04-04:00", "2016-03-29T10:04-04:00",
                              1, 0.0f, 0.0f)));
   maneuver.InsertTransitStop(
       std::move(GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5rsq8pqg-8st~nyu<r21n",
-                                       "8 St - NYU", "", "2016-03-29T08:02-04:00", 1, 0.0f, 0.0f)));
+                                       "8 St - NYU", "", "2016-03-29T10:02-04:00", 1, 0.0f, 0.0f)));
 }
 
 void PopulateTransitManeuverList_1_stop_count_8(std::list<Maneuver>& maneuvers,
@@ -2646,44 +2644,44 @@ void PopulateTransitManeuverList_1_stop_count_8(std::list<Maneuver>& maneuvers,
   // Insert the transit stops in reverse order (end to begin of line)
   maneuver.InsertTransitStop(
       std::move(GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5ru3006q-23st<d18n",
-                                       "23 St", "2016-05-17T08:32-04:00", "", 0, 0.0f, 0.0f)));
+                                       "23 St", "2016-05-17T10:32-04:00", "", 0, 0.0f, 0.0f)));
 
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5ru0jt7k-14st<d19n", "14 St",
-                             "2016-05-17T08:30-04:00", "2016-05-17T08:30-04:00", 0, 0.0f, 0.0f)));
+                             "2016-05-17T10:30-04:00", "2016-05-17T10:30-04:00", 0, 0.0f, 0.0f)));
 
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5rsp47p6-w4st<d20n", "W 4 St",
-                             "2016-05-17T08:29-04:00", "2016-05-17T08:29-04:00", 0, 0.0f, 0.0f)));
+                             "2016-05-17T10:29-04:00", "2016-05-17T10:29-04:00", 0, 0.0f, 0.0f)));
 
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation,
                              "s-dr5rsjvd53-broadway~lafayettest<d21n", "Broadway-Lafayette St",
-                             "2016-05-17T08:26-04:00", "2016-05-17T08:26-04:00", 0, 0.0f, 0.0f)));
+                             "2016-05-17T10:26-04:00", "2016-05-17T10:26-04:00", 0, 0.0f, 0.0f)));
 
   maneuver.InsertTransitStop(
       std::move(GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5rskecru-essexst<m18n",
-                                       "Essex St", "2016-05-17T08:23-04:00", "2016-05-17T08:23-04:00",
+                                       "Essex St", "2016-05-17T10:23-04:00", "2016-05-17T10:23-04:00",
                                        0, 0.0f, 0.0f)));
 
   maneuver.InsertTransitStop(
       std::move(GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5rt49x7k-marcyav<m16n",
-                                       "Marcy Av", "2016-05-17T08:16-04:00", "2016-05-17T08:16-04:00",
+                                       "Marcy Av", "2016-05-17T10:16-04:00", "2016-05-17T10:16-04:00",
                                        0, 0.0f, 0.0f)));
 
   maneuver.InsertTransitStop(
       std::move(GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5rt4ky8n-hewesst<m14n",
-                                       "Hewes St", "2016-05-17T08:15-04:00", "2016-05-17T08:15-04:00",
+                                       "Hewes St", "2016-05-17T10:15-04:00", "2016-05-17T10:15-04:00",
                                        0, 0.0f, 0.0f)));
 
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5rt3cjhx-lorimerst<m13n",
-                             "Lorimer St", "2016-05-17T08:13-04:00", "2016-05-17T08:13-04:00", 0,
+                             "Lorimer St", "2016-05-17T10:13-04:00", "2016-05-17T10:13-04:00", 0,
                              0.0f, 0.0f)));
 
   maneuver.InsertTransitStop(std::move(
       GetTransitPlatformInfo(TransitPlatformInfo_Type_kStation, "s-dr5rt3m8ny-flushingav<m12n",
-                             "Flushing Av", "", "2016-05-17T08:11-04:00", 0, 0.0f, 0.0f)));
+                             "Flushing Av", "", "2016-05-17T10:11-04:00", 0, 0.0f, 0.0f)));
 }
 
 void PopulateTransitTransferManeuverList_0_no_name(std::list<Maneuver>& maneuvers,
@@ -7545,12 +7543,21 @@ TEST(NarrativeBuilder, TestBuildTransit_0_train_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitManeuverList_0_train(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
+  SetExpectedManeuverInstructions(expected_maneuvers, "Take the train. (4 stops)", "", "",
+                                  "Take the train.", "Travel 4 stops.",
+                                  "Depart: 08:02 from 8 St - NYU.",
+                                  "Depart at 08:02 from 8 St - NYU.",
+                                  "Arrive: 08:08 at 34 St - Herald Sq.",
+                                  "Arrive at 08:08 at 34 St - Herald Sq.");
+#else
   SetExpectedManeuverInstructions(expected_maneuvers, "Take the train. (4 stops)", "", "",
                                   "Take the train.", "Travel 4 stops.",
                                   "Depart: 8:02 AM from 8 St - NYU.",
                                   "Depart at 8:02 AM from 8 St - NYU.",
                                   "Arrive: 8:08 AM at 34 St - Herald Sq.",
                                   "Arrive at 8:08 AM at 34 St - Herald Sq.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7576,11 +7583,19 @@ TEST(NarrativeBuilder, TestBuildTransit_0_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitManeuverList_0(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
+  SetExpectedManeuverInstructions(expected_maneuvers, "Take the R. (4 stops)", "", "", "Take the R.",
+                                  "Travel 4 stops.", "Depart: 08:02 from 8 St - NYU.",
+                                  "Depart at 08:02 from 8 St - NYU.",
+                                  "Arrive: 08:08 at 34 St - Herald Sq.",
+                                  "Arrive at 08:08 at 34 St - Herald Sq.");
+#else
   SetExpectedManeuverInstructions(expected_maneuvers, "Take the R. (4 stops)", "", "", "Take the R.",
                                   "Travel 4 stops.", "Depart: 8:02 AM from 8 St - NYU.",
                                   "Depart at 8:02 AM from 8 St - NYU.",
                                   "Arrive: 8:08 AM at 34 St - Herald Sq.",
                                   "Arrive at 8:08 AM at 34 St - Herald Sq.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7606,6 +7621,15 @@ TEST(NarrativeBuilder, TestBuildTransit_1_cable_car_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitManeuverList_1_cable_car(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
+  SetExpectedManeuverInstructions(expected_maneuvers,
+                                  "Take the cable car toward Powell & Market. (7 stops)", "", "",
+                                  "Take the cable car toward Powell & Market.", "Travel 7 stops.",
+                                  "Depart: 08:03 from Hyde St & Bay St.",
+                                  "Depart at 08:03 from Hyde St & Bay St.",
+                                  "Arrive: 08:06 at Hyde St & Vallejo St.",
+                                  "Arrive at 08:06 at Hyde St & Vallejo St.");
+#else
   SetExpectedManeuverInstructions(expected_maneuvers,
                                   "Take the cable car toward Powell & Market. (7 stops)", "", "",
                                   "Take the cable car toward Powell & Market.", "Travel 7 stops.",
@@ -7613,6 +7637,7 @@ TEST(NarrativeBuilder, TestBuildTransit_1_cable_car_miles_en_US) {
                                   "Depart at 8:03 AM from Hyde St & Bay St.",
                                   "Arrive: 8:06 AM at Hyde St & Vallejo St.",
                                   "Arrive at 8:06 AM at Hyde St & Vallejo St.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7638,13 +7663,22 @@ TEST(NarrativeBuilder, TestBuildTransit_1_stop_count_1_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitManeuverList_1_stop_count_1(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
   SetExpectedManeuverInstructions(expected_maneuvers,
                                   "Take the R toward FOREST HILLS - 71 AV. (1 stop)", "", "",
                                   "Take the R toward FOREST HILLS - 71 AV.", "Travel 1 stop.",
-                                  "Depart: 8:06 AM from Union St.",
-                                  "Depart at 8:06 AM from Union St.",
-                                  "Arrive: 8:08 AM at Atlantic Av - Barclays Ctr.",
-                                  "Arrive at 8:08 AM at Atlantic Av - Barclays Ctr.");
+                                  "Depart: 10:06 from Union St.", "Depart at 10:06 from Union St.",
+                                  "Arrive: 10:08 at Atlantic Av - Barclays Ctr.",
+                                  "Arrive at 10:08 at Atlantic Av - Barclays Ctr.");
+#else
+  SetExpectedManeuverInstructions(expected_maneuvers,
+                                  "Take the R toward FOREST HILLS - 71 AV. (1 stop)", "", "",
+                                  "Take the R toward FOREST HILLS - 71 AV.", "Travel 1 stop.",
+                                  "Depart: 10:06 AM from Union St.",
+                                  "Depart at 10:06 AM from Union St.",
+                                  "Arrive: 10:08 AM at Atlantic Av - Barclays Ctr.",
+                                  "Arrive at 10:08 AM at Atlantic Av - Barclays Ctr.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7670,12 +7704,21 @@ TEST(NarrativeBuilder, TestBuildTransit_1_stop_count_2_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitManeuverList_1_stop_count_2(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
   SetExpectedManeuverInstructions(expected_maneuvers,
                                   "Take the R toward BAY RIDGE - 95 ST. (2 stops)", "", "",
                                   "Take the R toward BAY RIDGE - 95 ST.", "Travel 2 stops.",
-                                  "Depart: 8:05 AM from 28 St.", "Depart at 8:05 AM from 28 St.",
-                                  "Arrive: 8:08 AM at 14 St - Union Sq.",
-                                  "Arrive at 8:08 AM at 14 St - Union Sq.");
+                                  "Depart: 10:05 from 28 St.", "Depart at 10:05 from 28 St.",
+                                  "Arrive: 10:08 at 14 St - Union Sq.",
+                                  "Arrive at 10:08 at 14 St - Union Sq.");
+#else
+  SetExpectedManeuverInstructions(expected_maneuvers,
+                                  "Take the R toward BAY RIDGE - 95 ST. (2 stops)", "", "",
+                                  "Take the R toward BAY RIDGE - 95 ST.", "Travel 2 stops.",
+                                  "Depart: 10:05 AM from 28 St.", "Depart at 10:05 AM from 28 St.",
+                                  "Arrive: 10:08 AM at 14 St - Union Sq.",
+                                  "Arrive at 10:08 AM at 14 St - Union Sq.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7701,13 +7744,23 @@ TEST(NarrativeBuilder, TestBuildTransit_1_stop_count_4_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitManeuverList_1_stop_count_4(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
   SetExpectedManeuverInstructions(expected_maneuvers,
                                   "Take the R toward FOREST HILLS - 71 AV. (4 stops)", "", "",
                                   "Take the R toward FOREST HILLS - 71 AV.", "Travel 4 stops.",
-                                  "Depart: 8:02 AM from 8 St - NYU.",
-                                  "Depart at 8:02 AM from 8 St - NYU.",
-                                  "Arrive: 8:08 AM at 34 St - Herald Sq.",
-                                  "Arrive at 8:08 AM at 34 St - Herald Sq.");
+                                  "Depart: 10:02 from 8 St - NYU.",
+                                  "Depart at 10:02 from 8 St - NYU.",
+                                  "Arrive: 10:08 at 34 St - Herald Sq.",
+                                  "Arrive at 10:08 at 34 St - Herald Sq.");
+#else
+  SetExpectedManeuverInstructions(expected_maneuvers,
+                                  "Take the R toward FOREST HILLS - 71 AV. (4 stops)", "", "",
+                                  "Take the R toward FOREST HILLS - 71 AV.", "Travel 4 stops.",
+                                  "Depart: 10:02 AM from 8 St - NYU.",
+                                  "Depart at 10:02 AM from 8 St - NYU.",
+                                  "Arrive: 10:08 AM at 34 St - Herald Sq.",
+                                  "Arrive at 10:08 AM at 34 St - Herald Sq.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7733,12 +7786,21 @@ TEST(NarrativeBuilder, TestBuildTransit_1_stop_count_8_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitManeuverList_1_stop_count_8(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
   SetExpectedManeuverInstructions(expected_maneuvers,
                                   "Take the M toward FOREST HILLS - 71 AV. (8 stops)", "", "",
                                   "Take the M toward FOREST HILLS - 71 AV.", "Travel 8 stops.",
-                                  "Depart: 8:11 AM from Flushing Av.",
-                                  "Depart at 8:11 AM from Flushing Av.", "Arrive: 8:32 AM at 23 St.",
-                                  "Arrive at 8:32 AM at 23 St.");
+                                  "Depart: 10:11 from Flushing Av.",
+                                  "Depart at 10:11 from Flushing Av.", "Arrive: 10:32 at 23 St.",
+                                  "Arrive at 10:32 at 23 St.");
+#else
+  SetExpectedManeuverInstructions(expected_maneuvers,
+                                  "Take the M toward FOREST HILLS - 71 AV. (8 stops)", "", "",
+                                  "Take the M toward FOREST HILLS - 71 AV.", "Travel 8 stops.",
+                                  "Depart: 10:11 AM from Flushing Av.",
+                                  "Depart at 10:11 AM from Flushing Av.",
+                                  "Arrive: 10:32 AM at 23 St.", "Arrive at 10:32 AM at 23 St.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7767,9 +7829,9 @@ TEST(NarrativeBuilder, TestBuildTransit_1_stop_count_1_miles_cs_CZ) {
   SetExpectedManeuverInstructions(expected_maneuvers,
                                   "Jeďte R směrem na FOREST HILLS - 71 AV. (1 zastávka)", "", "",
                                   "Jeďte R směrem na FOREST HILLS - 71 AV.", "Cestování 1 zastávka.",
-                                  "Vyjeďte: 08:06 z Union St.", "Vyjeďte v 08:06 z Union St.",
-                                  "Přijeďte: 08:08 do Atlantic Av - Barclays Ctr.",
-                                  "Přijeďte v 08:08 do Atlantic Av - Barclays Ctr.");
+                                  "Vyjeďte: 10:06 z Union St.", "Vyjeďte v 10:06 z Union St.",
+                                  "Přijeďte: 10:08 do Atlantic Av - Barclays Ctr.",
+                                  "Přijeďte v 10:08 do Atlantic Av - Barclays Ctr.");
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7798,9 +7860,9 @@ TEST(NarrativeBuilder, TestBuildTransit_1_stop_count_2_miles_cs_CZ) {
   SetExpectedManeuverInstructions(expected_maneuvers,
                                   "Jeďte R směrem na BAY RIDGE - 95 ST. (2 zastávky)", "", "",
                                   "Jeďte R směrem na BAY RIDGE - 95 ST.", "Cestování 2 zastávky.",
-                                  "Vyjeďte: 08:05 z 28 St.", "Vyjeďte v 08:05 z 28 St.",
-                                  "Přijeďte: 08:08 do 14 St - Union Sq.",
-                                  "Přijeďte v 08:08 do 14 St - Union Sq.");
+                                  "Vyjeďte: 10:05 z 28 St.", "Vyjeďte v 10:05 z 28 St.",
+                                  "Přijeďte: 10:08 do 14 St - Union Sq.",
+                                  "Přijeďte v 10:08 do 14 St - Union Sq.");
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7829,9 +7891,9 @@ TEST(NarrativeBuilder, TestBuildTransit_1_stop_count_4_miles_cs_CZ) {
   SetExpectedManeuverInstructions(expected_maneuvers,
                                   "Jeďte R směrem na FOREST HILLS - 71 AV. (4 zastávky)", "", "",
                                   "Jeďte R směrem na FOREST HILLS - 71 AV.", "Cestování 4 zastávky.",
-                                  "Vyjeďte: 08:02 z 8 St - NYU.", "Vyjeďte v 08:02 z 8 St - NYU.",
-                                  "Přijeďte: 08:08 do 34 St - Herald Sq.",
-                                  "Přijeďte v 08:08 do 34 St - Herald Sq.");
+                                  "Vyjeďte: 10:02 z 8 St - NYU.", "Vyjeďte v 10:02 z 8 St - NYU.",
+                                  "Přijeďte: 10:08 do 34 St - Herald Sq.",
+                                  "Přijeďte v 10:08 do 34 St - Herald Sq.");
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7860,8 +7922,8 @@ TEST(NarrativeBuilder, TestBuildTransit_1_stop_count_8_miles_cs_CZ) {
   SetExpectedManeuverInstructions(expected_maneuvers,
                                   "Jeďte M směrem na FOREST HILLS - 71 AV. (8 zastávky)", "", "",
                                   "Jeďte M směrem na FOREST HILLS - 71 AV.", "Cestování 8 zastávky.",
-                                  "Vyjeďte: 08:11 z Flushing Av.", "Vyjeďte v 08:11 z Flushing Av.",
-                                  "Přijeďte: 08:32 do 23 St.", "Přijeďte v 08:32 do 23 St.");
+                                  "Vyjeďte: 10:11 z Flushing Av.", "Vyjeďte v 10:11 z Flushing Av.",
+                                  "Přijeďte: 10:32 do 23 St.", "Přijeďte v 10:32 do 23 St.");
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7887,12 +7949,21 @@ TEST(NarrativeBuilder, TestBuildTransitTransfer_0_no_name_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitTransferManeuverList_0_no_name(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
+  SetExpectedManeuverInstructions(expected_maneuvers, "Transfer to take the train. (4 stops)", "", "",
+                                  "Transfer to take the train.", "Travel 4 stops.",
+                                  "Depart: 08:02 from 8 St - NYU.",
+                                  "Depart at 08:02 from 8 St - NYU.",
+                                  "Arrive: 08:08 at 34 St - Herald Sq.",
+                                  "Arrive at 08:08 at 34 St - Herald Sq.");
+#else
   SetExpectedManeuverInstructions(expected_maneuvers, "Transfer to take the train. (4 stops)", "", "",
                                   "Transfer to take the train.", "Travel 4 stops.",
                                   "Depart: 8:02 AM from 8 St - NYU.",
                                   "Depart at 8:02 AM from 8 St - NYU.",
                                   "Arrive: 8:08 AM at 34 St - Herald Sq.",
                                   "Arrive at 8:08 AM at 34 St - Herald Sq.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7918,12 +7989,21 @@ TEST(NarrativeBuilder, TestBuildTransitTransfer_0_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitTransferManeuverList_0(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
+  SetExpectedManeuverInstructions(expected_maneuvers, "Transfer to take the R. (4 stops)", "", "",
+                                  "Transfer to take the R.", "Travel 4 stops.",
+                                  "Depart: 08:02 from 8 St - NYU.",
+                                  "Depart at 08:02 from 8 St - NYU.",
+                                  "Arrive: 08:08 at 34 St - Herald Sq.",
+                                  "Arrive at 08:08 at 34 St - Herald Sq.");
+#else
   SetExpectedManeuverInstructions(expected_maneuvers, "Transfer to take the R. (4 stops)", "", "",
                                   "Transfer to take the R.", "Travel 4 stops.",
                                   "Depart: 8:02 AM from 8 St - NYU.",
                                   "Depart at 8:02 AM from 8 St - NYU.",
                                   "Arrive: 8:08 AM at 34 St - Herald Sq.",
                                   "Arrive at 8:08 AM at 34 St - Herald Sq.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7949,6 +8029,15 @@ TEST(NarrativeBuilder, TestBuildTransitTransfer_1_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitTransferManeuverList_1(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
+  SetExpectedManeuverInstructions(expected_maneuvers,
+                                  "Transfer to take the R toward FOREST HILLS - 71 AV. (4 stops)", "",
+                                  "", "Transfer to take the R toward FOREST HILLS - 71 AV.",
+                                  "Travel 4 stops.", "Depart: 08:02 from 8 St - NYU.",
+                                  "Depart at 08:02 from 8 St - NYU.",
+                                  "Arrive: 08:08 at 34 St - Herald Sq.",
+                                  "Arrive at 08:08 at 34 St - Herald Sq.");
+#else
   SetExpectedManeuverInstructions(expected_maneuvers,
                                   "Transfer to take the R toward FOREST HILLS - 71 AV. (4 stops)", "",
                                   "", "Transfer to take the R toward FOREST HILLS - 71 AV.",
@@ -7956,6 +8045,7 @@ TEST(NarrativeBuilder, TestBuildTransitTransfer_1_miles_en_US) {
                                   "Depart at 8:02 AM from 8 St - NYU.",
                                   "Arrive: 8:08 AM at 34 St - Herald Sq.",
                                   "Arrive at 8:08 AM at 34 St - Herald Sq.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -7981,12 +8071,21 @@ TEST(NarrativeBuilder, TestBuildTransitRemainOn_0_no_name_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitRemainOnManeuverList_0_no_name(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
+  SetExpectedManeuverInstructions(expected_maneuvers, "Remain on the train. (4 stops)", "", "",
+                                  "Remain on the train.", "Travel 4 stops.",
+                                  "Depart: 08:02 from 8 St - NYU.",
+                                  "Depart at 08:02 from 8 St - NYU.",
+                                  "Arrive: 08:08 at 34 St - Herald Sq.",
+                                  "Arrive at 08:08 at 34 St - Herald Sq.");
+#else
   SetExpectedManeuverInstructions(expected_maneuvers, "Remain on the train. (4 stops)", "", "",
                                   "Remain on the train.", "Travel 4 stops.",
                                   "Depart: 8:02 AM from 8 St - NYU.",
                                   "Depart at 8:02 AM from 8 St - NYU.",
                                   "Arrive: 8:08 AM at 34 St - Herald Sq.",
                                   "Arrive at 8:08 AM at 34 St - Herald Sq.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -8012,12 +8111,21 @@ TEST(NarrativeBuilder, TestBuildTransitRemainOn_0_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitRemainOnManeuverList_0(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
+  SetExpectedManeuverInstructions(expected_maneuvers, "Remain on the R. (4 stops)", "", "",
+                                  "Remain on the R.", "Travel 4 stops.",
+                                  "Depart: 08:02 from 8 St - NYU.",
+                                  "Depart at 08:02 from 8 St - NYU.",
+                                  "Arrive: 08:08 at 34 St - Herald Sq.",
+                                  "Arrive at 08:08 at 34 St - Herald Sq.");
+#else
   SetExpectedManeuverInstructions(expected_maneuvers, "Remain on the R. (4 stops)", "", "",
                                   "Remain on the R.", "Travel 4 stops.",
                                   "Depart: 8:02 AM from 8 St - NYU.",
                                   "Depart at 8:02 AM from 8 St - NYU.",
                                   "Arrive: 8:08 AM at 34 St - Herald Sq.",
                                   "Arrive at 8:08 AM at 34 St - Herald Sq.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }
@@ -8043,6 +8151,15 @@ TEST(NarrativeBuilder, TestBuildTransitRemainOn_1_miles_en_US) {
   // Configure expected maneuvers based on directions options
   std::list<Maneuver> expected_maneuvers;
   PopulateTransitRemainOnManeuverList_1(expected_maneuvers, country_code, state_code);
+#ifdef __APPLE__
+  SetExpectedManeuverInstructions(expected_maneuvers,
+                                  "Remain on the R toward FOREST HILLS - 71 AV. (4 stops)", "", "",
+                                  "Remain on the R toward FOREST HILLS - 71 AV.", "Travel 4 stops.",
+                                  "Depart: 08:02 from 8 St - NYU.",
+                                  "Depart at 08:02 from 8 St - NYU.",
+                                  "Arrive: 08:08 at 34 St - Herald Sq.",
+                                  "Arrive at 08:08 at 34 St - Herald Sq.");
+#else
   SetExpectedManeuverInstructions(expected_maneuvers,
                                   "Remain on the R toward FOREST HILLS - 71 AV. (4 stops)", "", "",
                                   "Remain on the R toward FOREST HILLS - 71 AV.", "Travel 4 stops.",
@@ -8050,6 +8167,7 @@ TEST(NarrativeBuilder, TestBuildTransitRemainOn_1_miles_en_US) {
                                   "Depart at 8:02 AM from 8 St - NYU.",
                                   "Arrive: 8:08 AM at 34 St - Herald Sq.",
                                   "Arrive at 8:08 AM at 34 St - Herald Sq.");
+#endif
 
   TryBuild(options, maneuvers, expected_maneuvers);
 }

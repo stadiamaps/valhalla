@@ -1,14 +1,11 @@
 #ifndef VALHALLA_MJOLNIR_IDTABLE_H
 #define VALHALLA_MJOLNIR_IDTABLE_H
 
-#include <algorithm>
+#include <ankerl/unordered_dense.h>
+
 #include <cmath>
 #include <cstdint>
 #include <fstream>
-
-#include <robin_hood.h>
-
-#include <midgard/logging.h>
 
 namespace valhalla {
 namespace mjolnir {
@@ -77,7 +74,7 @@ public:
     if (!file.is_open()) {
       return false;
     }
-    uint64_t entries = static_cast<uint64_t>(file.tellg()) / 2;
+    uint64_t entries = static_cast<uint64_t>(file.tellg()) / (2 * sizeof(uint64_t));
     file.seekg(0, std::ios::beg);
 
     // TODO: do more than one entry at a time, buffer 10k of them into a vector and read that
@@ -103,7 +100,7 @@ public:
   }
 
 private:
-  robin_hood::unordered_map<uint64_t, uint64_t> bitmarkers_;
+  ankerl::unordered_dense::map<uint64_t, uint64_t> bitmarkers_;
 };
 
 } // namespace mjolnir

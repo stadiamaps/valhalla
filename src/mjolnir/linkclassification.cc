@@ -1,16 +1,22 @@
+#include "midgard/util.h"
+#include "mjolnir/node_expander.h"
+#include "mjolnir/osmdata.h"
+#include "mjolnir/util.h"
+#include "scoped_timer.h"
+
+#ifdef LOGGING_LEVEL_DEBUG
+#include "baldr/json.h"
+
+#include <sstream>
+#endif
+
 #include <optional>
 #include <queue>
 #include <unordered_set>
 #include <vector>
 
-#include "baldr/graphid.h"
-#include "baldr/json.h"
-#include "midgard/util.h"
-#include "mjolnir/ferry_connections.h"
-#include "mjolnir/node_expander.h"
-#include "mjolnir/util.h"
-
 using namespace valhalla::baldr;
+using namespace valhalla::midgard;
 
 namespace valhalla {
 namespace mjolnir {
@@ -69,16 +75,16 @@ struct Data {
   Data(const std::string& nodes_file,
        const std::string& edges_file,
        const std::string& ways_file,
-       const std::string& way_nodes_file,
+       const std::string& edge_shapes_file,
        const OSMData& osmdata)
       : nodes(nodes_file, false), edges(edges_file, false), ways(ways_file, false),
-        way_nodes(way_nodes_file, false), osmdata(osmdata) {
+        edge_shapes(edge_shapes_file, false), osmdata(osmdata) {
   }
 
   sequence<Node> nodes;
   sequence<Edge> edges;
   sequence<OSMWay> ways;
-  sequence<OSMWayNode> way_nodes;
+  sequence<OSMWayNodeShape> edge_shapes;
   const OSMData& osmdata;
 };
 
@@ -87,8 +93,7 @@ std::vector<PointLL> EdgeShape(Data& data, const Edge& edge) {
   const size_t count = edge.attributes.llcount;
   std::vector<PointLL> shape;
   for (size_t i = 0; i < count; ++i) {
-    auto node = (*data.way_nodes[idx++]).node;
-    shape.emplace_back(node.latlng());
+    shape.emplace_back((*data.edge_shapes[idx++]).latlng());
   }
   return shape;
 }
@@ -112,7 +117,7 @@ nodelist_t FormExitNodes(sequence<Node>& nodes, sequence<Edge>& edges) {
     // If the node has a both links and non links at it
     auto bundle = collect_node_edges(node_itr, nodes, edges);
     if (bundle.node.link_edge_ && bundle.node.non_link_edge_) {
-      // Check if this node has a link edge that is drivable from the node
+      // Check if this node has a link edge that is outgoing (i.e. driveforward) from the node
       for (const auto& edge : bundle.node_edges) {
         if (edge.first.attributes.link && (edge.first.attributes.driveforward)) {
           // Get the highest classification of non-link edges at this node.
@@ -149,6 +154,13 @@ struct WayTags {
     return refs.empty() && dest_refs.empty();
   }
 
+  /**
+   * Parses destination:ref & ref tags as separate vectors of names
+   *
+   * @param way     The way to parse the tags of
+   * @param omsdata The data parsed from the PBF
+   * @returns a WayTags object holding the vectors of names
+   */
   static WayTags Parse(const OSMWay& way, const OSMData& osmdata) {
     WayTags road_tags;
 
@@ -886,21 +898,22 @@ std::pair<uint32_t, uint32_t> ReclassifyLinkGraph(std::vector<LinkGraphNode>& li
 void ReclassifyLinks(const std::string& ways_file,
                      const std::string& nodes_file,
                      const std::string& edges_file,
-                     const std::string& way_nodes_file,
+                     const std::string& edge_shapes_file,
                      const OSMData& osmdata,
                      bool reclassify_links,
                      bool infer_turn_channels) {
+  SCOPED_TIMER();
   LOG_INFO("Reclassifying_V2 link graph edges...");
 
-  Data data(nodes_file, edges_file, ways_file, way_nodes_file, osmdata);
+  Data data(nodes_file, edges_file, ways_file, edge_shapes_file, osmdata);
   // Find list of exit nodes - nodes where drivable outbound links connect to
   // non-link edges. Group by best road class of the non-link connecting edges.
   nodelist_t exit_nodes = FormExitNodes(data.nodes, data.edges);
 
   // Iterate through the exit node list by classification so exits from major
   // roads are considered before exits from minor roads.
-  uint32_t reclass_count = 0;
-  uint32_t tc_count = 0;
+  [[maybe_unused]] uint32_t reclass_count = 0;
+  [[maybe_unused]] uint32_t tc_count = 0;
 
   for (uint32_t classification = 0; classification < kMaxClassification; classification++) {
     for (auto& node : exit_nodes[classification]) {

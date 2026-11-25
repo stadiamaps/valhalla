@@ -1,11 +1,8 @@
+#include "loki/worker.h"
 #include "test.h"
+#include "thor/unidirectional_astar.h"
 
 #include <string>
-
-#include "loki/worker.h"
-#include "midgard/logging.h"
-#include "sif/autocost.h"
-#include "thor/worker.h"
 
 using namespace valhalla;
 using namespace valhalla::thor;
@@ -13,7 +10,6 @@ using namespace valhalla::sif;
 using namespace valhalla::loki;
 using namespace valhalla::baldr;
 using namespace valhalla::midgard;
-using namespace valhalla::tyr;
 
 namespace {
 // Maximum edge score - base this on costing type.
@@ -76,13 +72,13 @@ void try_path(GraphReader& reader,
   Api request;
   ParseApi(test_request, Options::route, request);
   loki_worker.route(request);
+  loki_worker.cleanup();
   adjust_scores(*request.mutable_options());
 
   // For now this just tests auto costing - could extend to other
   request.mutable_options()->set_costing_type(Costing::auto_);
   sif::TravelMode mode;
   auto mode_costing = sif::CostFactory{}.CreateModeCosting(*request.mutable_options(), mode);
-  cost_ptr_t costing = mode_costing[static_cast<size_t>(mode)];
 
   TimeDepForward astar;
   valhalla::Location origin = request.options().locations(0);
