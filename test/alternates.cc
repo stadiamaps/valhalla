@@ -1,16 +1,10 @@
-#include "test.h"
-
-#include <iostream>
-#include <string>
-
 #include "baldr/rapidjson_utils.h"
 #include "loki/worker.h"
-#include "midgard/logging.h"
-#include "midgard/util.h"
 #include "odin/worker.h"
+#include "test.h"
 #include "thor/worker.h"
-#include "tyr/serializers.h"
-#include <boost/property_tree/ptree.hpp>
+
+#include <string>
 
 using namespace valhalla;
 using namespace valhalla::thor;
@@ -32,6 +26,7 @@ struct route_tester {
     Api request;
     ParseApi(request_json, Options::route, request);
     loki_worker.route(request);
+    loki_worker.cleanup();
     std::pair<std::list<TripLeg>, std::list<DirectionsLeg>> results;
     thor_worker.route(request);
     response_json = odin_worker.narrate(request);

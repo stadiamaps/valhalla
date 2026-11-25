@@ -1,8 +1,5 @@
-#include <iostream>
-#include <unordered_map>
-
-#include "midgard/logging.h"
 #include "odin/directionsbuilder.h"
+#include "exceptions.h"
 #include "odin/enhancedtrippath.h"
 #include "odin/maneuversbuilder.h"
 #include "odin/markup_formatter.h"
@@ -10,11 +7,10 @@
 #include "odin/narrativebuilder.h"
 #include "proto/directions.pb.h"
 #include "proto/options.pb.h"
-#include "worker.h"
 
 namespace {
 // Minimum edge length to verify heading (~3 feet)
-constexpr auto kMinEdgeLength = 0.001f;
+constexpr auto kMinLengthHeading = 0.001f;
 
 } // namespace
 
@@ -67,21 +63,21 @@ void DirectionsBuilder::Build(Api& api, const MarkupFormatter& markup_formatter)
 // Update the heading of ~0 length edges.
 void DirectionsBuilder::UpdateHeading(EnhancedTripLeg* etp) {
 
-  for (size_t x = 0; x < etp->node_size(); ++x) {
+  for (int x = 0; x < etp->node_size(); ++x) {
     auto prev_edge = etp->GetPrevEdge(x);
     auto curr_edge = etp->GetCurrEdge(x);
     auto next_edge = etp->GetNextEdge(x);
 
     // If very short edge and no headings
-    if (curr_edge && (curr_edge->length_km() <= kMinEdgeLength) &&
+    if (curr_edge && (curr_edge->length_km() <= kMinLengthHeading) &&
         (curr_edge->begin_heading() == 0) && (curr_edge->end_heading() == 0)) {
       // Use next edge to set the current begin/end heading
-      if (next_edge && (next_edge->length_km() > kMinEdgeLength)) {
+      if (next_edge && (next_edge->length_km() > kMinLengthHeading)) {
         curr_edge->set_begin_heading(next_edge->begin_heading());
         curr_edge->set_end_heading(next_edge->begin_heading());
       }
       // Use prev edge to set the current begin/end heading
-      else if (prev_edge && (prev_edge->length_km() > kMinEdgeLength)) {
+      else if (prev_edge && (prev_edge->length_km() > kMinLengthHeading)) {
         curr_edge->set_begin_heading(prev_edge->end_heading());
         curr_edge->set_end_heading(prev_edge->end_heading());
       }
@@ -95,13 +91,11 @@ void DirectionsBuilder::PopulateDirectionsLeg(const Options& options,
                                               EnhancedTripLeg* etp,
                                               std::list<Maneuver>& maneuvers,
                                               DirectionsLeg& trip_directions) {
-  bool has_toll = false;
-  bool has_highway = false;
-  bool has_ferry = false;
   // Populate trip and leg IDs
   trip_directions.set_trip_id(etp->trip_id());
   trip_directions.set_leg_id(etp->leg_id());
   trip_directions.set_leg_count(etp->leg_count());
+  trip_directions.mutable_level_changes()->CopyFrom(etp->level_changes());
 
   // Populate locations
   trip_directions.mutable_location()->CopyFrom(etp->location());
@@ -147,15 +141,12 @@ void DirectionsBuilder::PopulateDirectionsLeg(const Options& options,
     trip_maneuver->set_end_shape_index(maneuver.end_shape_index());
     if (maneuver.portions_toll()) {
       trip_maneuver->set_portions_toll(maneuver.portions_toll());
-      has_toll = true;
     }
     if (maneuver.portions_highway()) {
       trip_maneuver->set_portions_highway(maneuver.portions_highway());
-      has_highway = true;
     }
     if (maneuver.ferry()) {
       trip_maneuver->set_portions_ferry(maneuver.ferry());
-      has_ferry = true;
     }
 
     trip_maneuver->set_has_time_restrictions(maneuver.has_time_restrictions());
@@ -415,6 +406,10 @@ void DirectionsBuilder::PopulateDirectionsLeg(const Options& options,
         trip_maneuver->set_transit_type(maneuver.transit_type());
         break;
       }
+      case TravelMode_INT_MIN_SENTINEL_DO_NOT_USE_:
+      case TravelMode_INT_MAX_SENTINEL_DO_NOT_USE_:
+        // Sentinel values - should not occur in practice
+        break;
     }
   }
 
@@ -439,9 +434,9 @@ void DirectionsBuilder::PopulateDirectionsLeg(const Options& options,
   trip_directions.mutable_summary()->set_has_time_restrictions(has_time_restrictions);
 
   // Populate toll, highway, ferry tags
-  trip_directions.mutable_summary()->set_has_toll(has_toll);
-  trip_directions.mutable_summary()->set_has_highway(has_highway);
-  trip_directions.mutable_summary()->set_has_ferry(has_ferry);
+  trip_directions.mutable_summary()->set_has_toll(etp->summary().has_toll());
+  trip_directions.mutable_summary()->set_has_highway(etp->summary().has_highway());
+  trip_directions.mutable_summary()->set_has_ferry(etp->summary().has_ferry());
 }
 
 } // namespace odin

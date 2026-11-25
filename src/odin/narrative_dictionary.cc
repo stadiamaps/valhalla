@@ -1,10 +1,7 @@
-#include <stdexcept>
-
-#include <boost/property_tree/ptree.hpp>
-
+#include "odin/narrative_dictionary.h"
 #include "midgard/logging.h"
 
-#include "odin/narrative_dictionary.h"
+#include <boost/property_tree/ptree.hpp>
 
 namespace {
 
@@ -45,8 +42,12 @@ void NarrativeDictionary::Load(const boost::property_tree::ptree& narrative_pt) 
 
   /////////////////////////////////////////////////////////////////////////////
   LOG_TRACE("Populate posix_locale...");
-  // Populate posix locale
+  // Populate posix locale, strip the utf8 part off for windows to make it more likely to be supported
   posix_locale = narrative_pt.get<std::string>(kPosixLocaleKey, "en_US.UTF-8");
+#ifdef _WIN32
+  if (auto dot = posix_locale.find('.'); dot != std::string::npos)
+    posix_locale.resize(dot);
+#endif
   try {
     locale = std::locale(posix_locale.c_str());
   } catch (...) {
@@ -339,6 +340,14 @@ void NarrativeDictionary::Load(const boost::property_tree::ptree& narrative_pt) 
   LOG_TRACE("Populate exit_building_subset");
   // Populate exit_building_subset
   Load(exit_building_subset, narrative_pt.get_child(kExitBuildingKey));
+
+  LOG_TRACE("Populate level_change_subset");
+  // Populate level_change_subset
+  Load(level_change_subset, narrative_pt.get_child(kLevelChangeKey));
+
+  LOG_TRACE("Populate park_vehicle_subset");
+  // Populate park_vehicle_subset
+  Load(park_vehicle_subset, narrative_pt.get_child(kParkVehicleKey));
 }
 
 void NarrativeDictionary::Load(PhraseSet& phrase_handle,

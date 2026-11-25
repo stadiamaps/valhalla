@@ -1,30 +1,26 @@
 #include "loki/node_search.h"
-#include <cstdint>
-
-#include "baldr/rapidjson_utils.h"
-#include <boost/property_tree/ptree.hpp>
-#include <unordered_set>
-
 #include "baldr/graphid.h"
 #include "baldr/graphreader.h"
-#include "baldr/location.h"
+#include "baldr/rapidjson_utils.h"
 #include "baldr/tilehierarchy.h"
 #include "midgard/pointll.h"
-#include "midgard/vector2.h"
-
-#include "test.h"
-
-namespace vm = valhalla::midgard;
-namespace vb = valhalla::baldr;
-
-#include "filesystem.h"
 #include "mjolnir/directededgebuilder.h"
 #include "mjolnir/graphtilebuilder.h"
 #include "mjolnir/graphvalidator.h"
 
+#include <boost/property_tree/ptree.hpp>
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <filesystem>
+
+namespace vb = valhalla::baldr;
+namespace vm = valhalla::midgard;
 namespace vj = valhalla::mjolnir;
 
 namespace {
+
+constexpr bool build_bounding_circles{false};
 
 const std::string test_tile_dir = "test/node_search_tiles";
 
@@ -34,14 +30,14 @@ struct graph_writer {
   vj::GraphTileBuilder& builder(vb::GraphId tile_id);
 
   inline vm::PointLL node_latlng(vb::GraphId node_id) {
-    auto& b = builder(node_id.Tile_Base());
+    auto& b = builder(node_id.tile_base());
     return b.nodes()[node_id.id()].latlng(b.header_builder().base_ll());
   }
 
   void write_tiles();
 
 private:
-  const uint8_t m_level;
+  [[maybe_unused]] const uint8_t m_level;
   std::unordered_map<vb::GraphId, std::shared_ptr<vj::GraphTileBuilder>> m_builders;
 };
 
@@ -74,7 +70,7 @@ void graph_writer::write_tiles() {
     auto& tile = entry.second;
 
     // set the base lat,lng in the header builder
-    PointLL base_ll = TileHierarchy::get_tiling(tile_id.level()).Base(tile_id.tileid());
+    vm::PointLL base_ll = vb::TileHierarchy::get_tiling(tile_id.level()).Base(tile_id.tileid());
     tile->header_builder().set_base_ll(base_ll);
 
     // write the tile
@@ -85,9 +81,9 @@ void graph_writer::write_tiles() {
 
     // write the bin data
     GraphTileBuilder::tweeners_t tweeners;
-    auto reloaded = GraphTile::Create(test_tile_dir, tile_id);
-    auto bins = GraphTileBuilder::BinEdges(reloaded, tweeners);
-    GraphTileBuilder::AddBins(test_tile_dir, reloaded, bins);
+    auto reloaded = vb::GraphTile::Create(test_tile_dir, tile_id);
+    auto bins = GraphTileBuilder::BinEdges(reloaded, tweeners, build_bounding_circles);
+    GraphTileBuilder::AddBins(test_tile_dir, reloaded, bins, build_bounding_circles);
 
     // merge tweeners into global
     for (const auto& entry : tweeners) {
@@ -107,7 +103,7 @@ void graph_writer::write_tiles() {
   for (const auto& entry : all_tweeners) {
     // re-open tiles to add tweeners back in.
     auto tile = vb::GraphTile::Create(test_tile_dir, entry.first);
-    vj::GraphTileBuilder::AddBins(test_tile_dir, tile, entry.second);
+    vj::GraphTileBuilder::AddBins(test_tile_dir, tile, entry.second, build_bounding_circles);
   }
 }
 
@@ -179,11 +175,11 @@ void graph_builder::write_tiles(uint8_t level) const {
   node_ids.reserve(num_nodes);
   for (size_t i = 0; i < num_nodes; ++i) {
     auto coord = nodes[i];
-    auto tile_id = TileHierarchy::GetGraphId(coord, level);
-    PointLL base_ll = TileHierarchy::get_tiling(tile_id.level()).Base(tile_id.tileid());
+    auto tile_id = vb::TileHierarchy::GetGraphId(coord, level);
+    vm::PointLL base_ll = vb::TileHierarchy::get_tiling(tile_id.level()).Base(tile_id.tileid());
     uint32_t n = edges_from_node[i];
 
-    NodeInfo node_builder;
+    vb::NodeInfo node_builder;
     node_builder.set_latlng(base_ll, coord);
     node_builder.set_edge_index(edge_counts.update(tile_id, n));
     node_builder.set_edge_count(n);
@@ -216,7 +212,7 @@ void graph_builder::write_tiles(uint8_t level) const {
   std::unordered_map<vb::GraphId, edge_vector_t::iterator> tile_bases;
   vb::GraphId last_tile_id;
   for (edge_vector_t::iterator itr = renumbered_edges.begin(); itr != renumbered_edges.end(); ++itr) {
-    auto tile_id = itr->first.Tile_Base();
+    auto tile_id = itr->first.tile_base();
     if (last_tile_id != tile_id) {
       last_tile_id = tile_id;
       tile_bases[tile_id] = itr;
@@ -224,7 +220,7 @@ void graph_builder::write_tiles(uint8_t level) const {
   }
 
   for (auto e : renumbered_edges) {
-    auto tile_id = e.first.Tile_Base();
+    auto tile_id = e.first.tile_base();
     auto& tile = writer.builder(tile_id);
 
     bool forward = e.first < e.second;
@@ -232,7 +228,8 @@ void graph_builder::write_tiles(uint8_t level) const {
     vm::PointLL end_point = writer.node_latlng(e.second);
 
     DirectedEdgeBuilder edge_builder({}, e.second, forward, start_point.Distance(end_point), 1, 1, {},
-                                     {}, 0, false, false, false, false, 0, 0, false);
+                                     {}, 0, false, false, false, false, 0, 0, false,
+                                     vb::RoadClass::kInvalid);
 
     auto opp = std::make_pair(e.second, e.first);
     auto itr =
@@ -241,18 +238,18 @@ void graph_builder::write_tiles(uint8_t level) const {
     // check that we found the opposite edge, which should always exist.
     assert(itr != renumbered_edges.end() && *itr == opp);
 
-    uint32_t opp_index = std::distance(tile_bases[e.second.Tile_Base()], itr);
+    uint32_t opp_index = std::distance(tile_bases[e.second.tile_base()], itr);
     edge_builder.set_opp_index(opp_index);
 
     uint32_t edge_index = tile.directededges().size();
     uint32_t edge_info_offset = 0;
-    if ((opp_index < edge_index) && (e.second.Tile_Base() == tile_id)) {
+    if ((opp_index < edge_index) && (e.second.tile_base() == tile_id)) {
       // opp edge already exists in this tile, so use its edgeinfo
       edge_info_offset = tile.directededges()[opp_index].edgeinfo_offset();
 
     } else {
       // make an edgeinfo
-      std::vector<PointLL> shape = {start_point, end_point};
+      std::vector<vm::PointLL> shape = {start_point, end_point};
       if (!forward)
         std::reverse(shape.begin(), shape.end());
 
@@ -272,8 +269,8 @@ void graph_builder::write_tiles(uint8_t level) const {
 
 void make_tile() {
   // make sure that all the old tiles are gone before trying to make new ones.
-  if (filesystem::is_directory(test_tile_dir)) {
-    filesystem::remove_all(test_tile_dir);
+  if (std::filesystem::is_directory(test_tile_dir)) {
+    std::filesystem::remove_all(test_tile_dir);
   }
 
   graph_builder builder;

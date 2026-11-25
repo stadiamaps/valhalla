@@ -1,18 +1,18 @@
 #include "sif/motorscootercost.h"
-#include "baldr/accessrestriction.h"
 #include "baldr/directededge.h"
 #include "baldr/graphconstants.h"
 #include "baldr/nodeinfo.h"
-#include "midgard/constants.h"
-#include "midgard/util.h"
+#include "baldr/rapidjson_utils.h"
 #include "proto_conversions.h"
 #include "sif/costconstants.h"
 #include "sif/osrm_car_duration.h"
+
 #include <cassert>
 
 #ifdef INLINE_TEST
 #include "test.h"
 #include "worker.h"
+
 #include <random>
 #endif
 
@@ -46,6 +46,8 @@ constexpr float kTCCrossing = 2.0f;
 constexpr float kTCUnfavorable = 2.5f;
 constexpr float kTCUnfavorableSharp = 3.5f;
 constexpr float kTCReverse = 9.5f;
+constexpr float kTCRamp = 1.5f;
+constexpr float kTCRoundabout = 0.5f;
 
 // Turn costs based on side of street driving
 constexpr float kRightSideTurnCosts[] = {kTCStraight,       kTCSlight,  kTCFavorable,
@@ -174,24 +176,28 @@ public:
    * allowed on the edge. However, it can be extended to exclude access
    * based on other parameters such as conditional restrictions and
    * conditional access that can depend on time and travel mode.
-   * @param  edge           Pointer to a directed edge.
-   * @param  is_dest        Is a directed edge the destination?
-   * @param  pred           Predecessor edge information.
-   * @param  tile           Current tile.
-   * @param  edgeid         GraphId of the directed edge.
-   * @param  current_time   Current time (seconds since epoch). A value of 0
-   *                        indicates the route is not time dependent.
-   * @param  tz_index       timezone index for the node
+   * @param  edge                        Pointer to a directed edge.
+   * @param  pred                        Predecessor edge information.
+   * @param  tile                        Current tile.
+   * @param  edgeid                      GraphId of the directed edge.
+   * @param  current_time                Current time (seconds since epoch). A value of 0
+   *                                     indicates the route is not time dependent.
+   * @param  tz_index                    timezone index for the node
+   * @param  destonly_access_restr_mask  Mask containing access restriction types that had a
+   * local traffic exemption at the start of the expansion. This mask will be mutated by eliminating
+   * flags for locally exempt access restriction types that no longer exist on the passed edge
+   *
    * @return Returns true if access is allowed, false if not.
    */
   virtual bool Allowed(const baldr::DirectedEdge* edge,
-                       const bool is_dest,
                        const EdgeLabel& pred,
                        const graph_tile_ptr& tile,
                        const baldr::GraphId& edgeid,
                        const uint64_t current_time,
                        const uint32_t tz_index,
-                       uint8_t& restriction_idx) const override;
+                       uint8_t& restriction_idx,
+                       uint8_t& destonly_access_restr_mask,
+                       bool* edge_destonly) const override;
 
   /**
    * Checks if access is allowed for an edge on the reverse path
@@ -201,14 +207,18 @@ public:
    * extended to exclude access based on other parameters such as conditional
    * restrictions and conditional access that can depend on time and travel
    * mode.
-   * @param  edge           Pointer to a directed edge.
-   * @param  pred           Predecessor edge information.
-   * @param  opp_edge       Pointer to the opposing directed edge.
-   * @param  tile           Current tile.
-   * @param  edgeid         GraphId of the opposing edge.
-   * @param  current_time   Current time (seconds since epoch). A value of 0
-   *                        indicates the route is not time dependent.
-   * @param  tz_index       timezone index for the node
+   * @param  edge                        Pointer to a directed edge.
+   * @param  pred                        Predecessor edge information.
+   * @param  opp_edge                    Pointer to the opposing directed edge.
+   * @param  tile                        Current tile.
+   * @param  edgeid                      GraphId of the opposing edge.
+   * @param  current_time                Current time (seconds since epoch). A value of 0
+   *                                     indicates the route is not time dependent.
+   * @param  tz_index                    timezone index for the node
+   * @param  destonly_access_restr_mask  Mask containing access restriction types that had a
+   * local traffic exemption at the start of the expansion. This mask will be mutated by eliminating
+   * flags for locally exempt access restriction types that no longer exist on the passed edge
+   *
    * @return  Returns true if access is allowed, false if not.
    */
   virtual bool AllowedReverse(const baldr::DirectedEdge* edge,
@@ -218,7 +228,9 @@ public:
                               const baldr::GraphId& opp_edgeid,
                               const uint64_t current_time,
                               const uint32_t tz_index,
-                              uint8_t& restriction_idx) const override;
+                              uint8_t& restriction_idx,
+                              uint8_t& destonly_access_restr_mask,
+                              bool* edge_destonly) const override;
 
   /**
    * Only transit costings are valid for this method call, hence we throw
@@ -242,6 +254,7 @@ public:
    * @return  Returns the cost and time (seconds)
    */
   virtual Cost EdgeCost(const baldr::DirectedEdge* edge,
+                        const baldr::GraphId& edgeid,
                         const graph_tile_ptr& tile,
                         const baldr::TimeInfo& time_info,
                         uint8_t& flow_sources) const override;
@@ -250,32 +263,45 @@ public:
    * Returns the cost to make the transition from the predecessor edge.
    * Defaults to 0. Costing models that wish to include edge transition
    * costs (i.e., intersection/turn costs) must override this method.
-   * @param  edge  Directed edge (the to edge)
-   * @param  node  Node (intersection) where transition occurs.
-   * @param  pred  Predecessor edge information.
-   * @return  Returns the cost and time (seconds)
+   * @param  edge          Directed edge (the to edge)
+   * @param  node          Node (intersection) where transition occurs.
+   * @param  pred          Predecessor edge information.
+   * @param  tile          Pointer to the graph tile containing the to edge.
+   * @param  reader_getter Functor that facilitates access to a limited version of the graph reader
+   * @return Returns the cost and time (seconds)
    */
   virtual Cost TransitionCost(const baldr::DirectedEdge* edge,
                               const baldr::NodeInfo* node,
-                              const EdgeLabel& pred) const override;
+                              const EdgeLabel& pred,
+                              const graph_tile_ptr& tile,
+                              const std::function<baldr::LimitedGraphReader()>& reader_getter,
+                              const bool edge_destonly) const override;
 
   /**
    * Returns the cost to make the transition from the predecessor edge
    * when using a reverse search (from destination towards the origin).
-   * @param  idx   Directed edge local index
-   * @param  node  Node (intersection) where transition occurs.
-   * @param  pred  the opposing current edge in the reverse tree.
-   * @param  edge  the opposing predecessor in the reverse tree
+   * @param  idx                Directed edge local index
+   * @param  node               Node (intersection) where transition occurs.
+   * @param  pred               the opposing current edge in the reverse tree.
+   * @param  edge               the opposing predecessor in the reverse tree
+   * @param  tile               Graphtile that contains the node and the opp_edge
+   * @param  edge_id            Graph ID of opp_pred_edge to get its tile if needed
+   * @param  reader_getter      Functor that facilitates access to a limited version of the graph
+   * reader
    * @param  has_measured_speed Do we have any of the measured speed types set?
-   * @param  internal_turn  Did we make an turn on a short internal edge.
+   * @param  internal_turn      Did we make an turn on a short internal edge.
    * @return  Returns the cost and time (seconds)
    */
   virtual Cost TransitionCostReverse(const uint32_t idx,
                                      const baldr::NodeInfo* node,
                                      const baldr::DirectedEdge* pred,
                                      const baldr::DirectedEdge* edge,
+                                     const EdgeLabel& pred_label,
+                                     const graph_tile_ptr& tile,
+                                     const std::function<baldr::LimitedGraphReader()>& reader_getter,
                                      const bool has_measured_speed,
-                                     const InternalTurn /*internal_turn*/) const override;
+                                     const InternalTurn /*internal_turn*/,
+                                     const bool opp_edge_destonly) const override;
 
   /**
    * Get the cost factor for A* heuristics. This factor is multiplied
@@ -286,7 +312,7 @@ public:
    * estimate is less than the least possible time along roads.
    */
   virtual float AStarCostFactor() const override {
-    return speedfactor_[top_speed_];
+    return kSpeedFactor[top_speed_] * min_linear_cost_factor_;
   }
 
   /**
@@ -305,20 +331,19 @@ public:
    */
   bool Allowed(const baldr::DirectedEdge* edge,
                const graph_tile_ptr& tile,
+               const baldr::GraphId& edgeid,
                uint16_t disallow_mask = kDisallowNone) const override {
+    if (AllowedLinearFeature(edgeid)) {
+      return true;
+    }
     bool allow_closures = (!filter_closures_ && !(disallow_mask & kDisallowClosure)) ||
                           !(flow_mask_ & kCurrentFlowMask);
-    return DynamicCost::Allowed(edge, tile, disallow_mask) && !edge->bss_connection() &&
+    return DynamicCost::Allowed(edge, tile, edgeid, disallow_mask) && !edge->bss_connection() &&
            (allow_closures || !tile->IsClosed(edge));
   }
   // Hidden in source file so we don't need it to be protected
   // We expose it within the source file for testing purposes
 public:
-  std::vector<float> speedfactor_;
-  float density_factor_[16]; // Density factor
-
-  // Density factor used in edge transition costing
-  std::vector<float> trans_density_factor_;
   float road_factor_; // Road factor based on use_primary
 
   // Elevation/grade penalty (weighting applied based on the edge's weighted
@@ -328,25 +353,11 @@ public:
 
 // Constructor
 MotorScooterCost::MotorScooterCost(const Costing& costing)
-    : DynamicCost(costing, TravelMode::kDrive, kMopedAccess),
-      trans_density_factor_{1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.1f, 1.2f, 1.3f,
-                            1.4f, 1.6f, 1.9f, 2.2f, 2.5f, 2.8f, 3.1f, 3.5f} {
+    : DynamicCost(costing, TravelMode::kDrive, kMopedAccess) {
   const auto& costing_options = costing.options();
 
   // Get the base costs
   get_base_costs(costing);
-
-  // Create speed cost table
-  speedfactor_.resize(kMaxSpeedKph + 1, 0);
-  speedfactor_[0] = kSecPerHour; // TODO - what to make speed=0?
-  for (uint32_t s = 1; s <= kMaxSpeedKph; s++) {
-    speedfactor_[s] = (kSecPerHour * 0.001f) / static_cast<float>(s);
-  }
-
-  // Set density factors - used to penalize edges in dense, urban areas
-  for (uint32_t d = 0; d < 16; d++) {
-    density_factor_[d] = 0.85f + (d * 0.018f);
-  }
 
   // Set grade penalties based on use_hills option.
   // Scale from 0 (avoid hills) to 1 (don't avoid hills)
@@ -366,25 +377,34 @@ MotorScooterCost::MotorScooterCost(const Costing& costing)
 
 // Check if access is allowed on the specified edge.
 bool MotorScooterCost::Allowed(const baldr::DirectedEdge* edge,
-                               const bool is_dest,
                                const EdgeLabel& pred,
                                const graph_tile_ptr& tile,
                                const baldr::GraphId& edgeid,
                                const uint64_t current_time,
                                const uint32_t tz_index,
-                               uint8_t& restriction_idx) const {
+                               uint8_t& restriction_idx,
+                               uint8_t& destonly_access_restr_mask,
+                               bool* edge_destonly) const {
+  // the user asked for this edge to be usable no matter what
+  if (AllowedLinearFeature(edgeid)) {
+    return true;
+  }
+
   // Check access, U-turn, and simple turn restriction.
   // Allow U-turns at dead-end nodes.
   if (!IsAccessible(edge) || (!pred.deadend() && pred.opp_local_idx() == edge->localedgeidx()) ||
       ((pred.restrictions() & (1 << edge->localedgeidx())) && !ignore_turn_restrictions_) ||
       (edge->surface() > kMinimumScooterSurface) || IsUserAvoidEdge(edgeid) ||
       (!allow_destination_only_ && !pred.destonly() && edge->destonly()) ||
-      (pred.closure_pruning() && IsClosed(edge, tile))) {
+      (pred.closure_pruning() && IsClosed(edge, tile)) || CheckExclusions<true>(edge, pred)) {
     return false;
   }
 
-  return DynamicCost::EvaluateRestrictions(access_mask_, edge, is_dest, tile, edgeid, current_time,
-                                           tz_index, restriction_idx);
+  if (edge_destonly)
+    *edge_destonly = edge->destonly();
+  return DynamicCost::EvaluateRestrictions(access_mask_, edge, tile, edgeid, current_time, tz_index,
+                                           restriction_idx, destonly_access_restr_mask,
+                                           pred.destonly(), edge_destonly);
 }
 
 // Checks if access is allowed for an edge on the reverse path (from
@@ -396,22 +416,34 @@ bool MotorScooterCost::AllowedReverse(const baldr::DirectedEdge* edge,
                                       const baldr::GraphId& opp_edgeid,
                                       const uint64_t current_time,
                                       const uint32_t tz_index,
-                                      uint8_t& restriction_idx) const {
+                                      uint8_t& restriction_idx,
+                                      uint8_t& destonly_access_restr_mask,
+                                      bool* edge_destonly) const {
+  // the user asked for this edge to be usable no matter what
+  if (AllowedLinearFeature(opp_edgeid)) {
+    return true;
+  }
+
   // Check access, U-turn, and simple turn restriction.
   // Allow U-turns at dead-end nodes.
   if (!IsAccessible(opp_edge) || (!pred.deadend() && pred.opp_local_idx() == edge->localedgeidx()) ||
       ((opp_edge->restrictions() & (1 << pred.opp_local_idx())) && !ignore_turn_restrictions_) ||
       (opp_edge->surface() > kMinimumScooterSurface) || IsUserAvoidEdge(opp_edgeid) ||
       (!allow_destination_only_ && !pred.destonly() && opp_edge->destonly()) ||
-      (pred.closure_pruning() && IsClosed(opp_edge, tile))) {
+      (pred.closure_pruning() && IsClosed(opp_edge, tile)) ||
+      CheckExclusions<false>(opp_edge, pred)) {
     return false;
   }
 
-  return DynamicCost::EvaluateRestrictions(access_mask_, edge, false, tile, opp_edgeid, current_time,
-                                           tz_index, restriction_idx);
+  if (edge_destonly)
+    *edge_destonly = opp_edge->destonly();
+  return DynamicCost::EvaluateRestrictions(access_mask_, opp_edge, tile, opp_edgeid, current_time,
+                                           tz_index, restriction_idx, destonly_access_restr_mask,
+                                           pred.destonly(), edge_destonly);
 }
 
 Cost MotorScooterCost::EdgeCost(const baldr::DirectedEdge* edge,
+                                const baldr::GraphId& edgeid,
                                 const graph_tile_ptr& tile,
                                 const baldr::TimeInfo& time_info,
                                 uint8_t& flow_sources) const {
@@ -421,8 +453,8 @@ Cost MotorScooterCost::EdgeCost(const baldr::DirectedEdge* edge,
                    : fixed_speed_;
 
   if (edge->use() == Use::kFerry) {
-    assert(speed < speedfactor_.size());
-    float sec = (edge->length() * speedfactor_[speed]);
+    assert(speed < kSpeedFactor.size());
+    float sec = (edge->length() * kSpeedFactor[speed]);
     return {sec * ferry_factor_, sec};
   }
 
@@ -432,14 +464,14 @@ Cost MotorScooterCost::EdgeCost(const baldr::DirectedEdge* edge,
                      kSurfaceSpeedFactors[static_cast<uint32_t>(edge->surface())] *
                      kGradeBasedSpeedFactor[static_cast<uint32_t>(edge->weighted_grade())]));
 
-  assert(scooter_speed < speedfactor_.size());
-  float sec = (edge->length() * speedfactor_[scooter_speed]);
+  assert(scooter_speed < kSpeedFactor.size());
+  float sec = (edge->length() * kSpeedFactor[scooter_speed]);
 
   if (shortest_) {
     return Cost(edge->length(), sec);
   }
 
-  float factor = 1.0f + (density_factor_[edge->density()] - 0.85f) +
+  float factor = 1.0f + (kDensityFactor[edge->density()] - 0.85f) +
                  (road_factor_ * kRoadClassFactor[static_cast<uint32_t>(edge->classification())]) +
                  grade_penalty_[static_cast<uint32_t>(edge->weighted_grade())] +
                  SpeedPenalty(edge, tile, time_info, flow_sources, speed);
@@ -460,51 +492,57 @@ Cost MotorScooterCost::EdgeCost(const baldr::DirectedEdge* edge,
     factor *= closure_factor_;
   }
 
-  return {sec * factor, sec};
+  factor *= EdgeFactor(edgeid);
+  return Cost((sec * inv_distance_factor_ + edge->length() * distance_factor_) * factor, sec);
 }
 
 // Returns the time (in seconds) to make the transition from the predecessor
-Cost MotorScooterCost::TransitionCost(const baldr::DirectedEdge* edge,
-                                      const baldr::NodeInfo* node,
-                                      const EdgeLabel& pred) const {
+Cost MotorScooterCost::TransitionCost(
+    const baldr::DirectedEdge* edge,
+    const baldr::NodeInfo* node,
+    const EdgeLabel& pred,
+    const graph_tile_ptr& /*tile*/,
+    const std::function<baldr::LimitedGraphReader()>& /*reader_getter*/,
+    const bool edge_destonly) const {
   // Get the transition cost for country crossing, ferry, gate, toll booth,
   // destination only, alley, maneuver penalty
   uint32_t idx = pred.opp_local_idx();
-  Cost c = base_transition_cost(node, edge, &pred, idx);
+  Cost c = base_transition_cost(node, edge, &pred, idx, edge_destonly);
   c.secs += OSRMCarTurnDuration(edge, node, idx);
 
+  const auto stopimpact = edge->stopimpact(idx);
+  const auto turntype = edge->turntype(idx);
   // Transition time = turncost * stopimpact * densityfactor
-  if (edge->stopimpact(idx) > 0 && !shortest_) {
+  if (stopimpact > 0 && !shortest_) {
     float turn_cost;
     if (edge->edge_to_right(idx) && edge->edge_to_left(idx)) {
       turn_cost = kTCCrossing;
     } else {
-      turn_cost = (node->drive_on_right())
-                      ? kRightSideTurnCosts[static_cast<uint32_t>(edge->turntype(idx))]
-                      : kLeftSideTurnCosts[static_cast<uint32_t>(edge->turntype(idx))];
+      turn_cost = (node->drive_on_right()) ? kRightSideTurnCosts[static_cast<uint32_t>(turntype)]
+                                           : kLeftSideTurnCosts[static_cast<uint32_t>(turntype)];
     }
 
     if ((edge->use() != Use::kRamp && pred.use() == Use::kRamp) ||
         (edge->use() == Use::kRamp && pred.use() != Use::kRamp)) {
-      turn_cost += 1.5f;
+      turn_cost += kTCRamp;
       if (edge->roundabout())
-        turn_cost += 0.5f;
+        turn_cost += kTCRoundabout;
     }
 
     float seconds = turn_cost;
-    bool is_turn = false;
-    bool has_left = (edge->turntype(idx) == baldr::Turn::Type::kLeft ||
-                     edge->turntype(idx) == baldr::Turn::Type::kSharpLeft);
-    bool has_right = (edge->turntype(idx) == baldr::Turn::Type::kRight ||
-                      edge->turntype(idx) == baldr::Turn::Type::kSharpRight);
-    bool has_reverse = edge->turntype(idx) == baldr::Turn::Type::kReverse;
 
+    bool has_left =
+        (turntype == baldr::Turn::Type::kLeft || turntype == baldr::Turn::Type::kSharpLeft);
+    bool has_right =
+        (turntype == baldr::Turn::Type::kRight || turntype == baldr::Turn::Type::kSharpRight);
+    bool has_reverse = turntype == baldr::Turn::Type::kReverse;
+
+    bool is_turn = has_left || has_right || has_reverse;
     // Separate time and penalty when traffic is present. With traffic, edge speeds account for
     // much of the intersection transition time (TODO - evaluate different elapsed time settings).
     // Still want to add a penalty so routes avoid high cost intersections.
-    if (has_left || has_right || has_reverse) {
-      seconds *= edge->stopimpact(idx);
-      is_turn = true;
+    if (is_turn) {
+      seconds *= stopimpact;
     }
 
     AddUturnPenalty(idx, node, edge, has_reverse, has_left, has_right, false, InternalTurn::kNoTurn,
@@ -514,11 +552,15 @@ Cost MotorScooterCost::TransitionCost(const baldr::DirectedEdge* edge,
     // using traffic
     if (!pred.has_measured_speed()) {
       if (!is_turn)
-        seconds *= edge->stopimpact(idx);
-      seconds *= trans_density_factor_[node->density()];
+        seconds *= stopimpact;
+      seconds *= kTransDensityFactor[node->density()];
     }
     c.cost += seconds;
   }
+
+  // Account for the user preferring distance
+  c.cost *= inv_distance_factor_;
+
   return c;
 }
 
@@ -526,12 +568,17 @@ Cost MotorScooterCost::TransitionCost(const baldr::DirectedEdge* edge,
 // when using a reverse search (from destination towards the origin).
 // pred is the opposing current edge in the reverse tree
 // edge is the opposing predecessor in the reverse tree
-Cost MotorScooterCost::TransitionCostReverse(const uint32_t idx,
-                                             const baldr::NodeInfo* node,
-                                             const baldr::DirectedEdge* pred,
-                                             const baldr::DirectedEdge* edge,
-                                             const bool has_measured_speed,
-                                             const InternalTurn /*internal_turn*/) const {
+Cost MotorScooterCost::TransitionCostReverse(
+    const uint32_t idx,
+    const baldr::NodeInfo* node,
+    const baldr::DirectedEdge* pred,
+    const baldr::DirectedEdge* edge,
+    const EdgeLabel& pred_label,
+    const graph_tile_ptr& /*tile*/,
+    const std::function<baldr::LimitedGraphReader()>& /*reader_getter*/,
+    const bool has_measured_speed,
+    const InternalTurn /*internal_turn*/,
+    const bool opp_edge_destonly) const {
 
   // MotorScooters should be able to make uturns on short internal edges; therefore, InternalTurn
   // is ignored for now.
@@ -539,41 +586,40 @@ Cost MotorScooterCost::TransitionCostReverse(const uint32_t idx,
 
   // Get the transition cost for country crossing, ferry, gate, toll booth,
   // destination only, alley, maneuver penalty
-  Cost c = base_transition_cost(node, edge, pred, idx);
+  Cost c = base_transition_cost(node, edge, pred, idx, pred_label.destonly(), opp_edge_destonly);
   c.secs += OSRMCarTurnDuration(edge, node, pred->opp_local_idx());
 
+  const auto stopimpact = edge->stopimpact(idx);
+  const auto turntype = edge->turntype(idx);
   // Transition time = turncost * stopimpact * densityfactor
-  if (edge->stopimpact(idx) > 0 && !shortest_) {
+  if (stopimpact > 0 && !shortest_) {
     float turn_cost;
     if (edge->edge_to_right(idx) && edge->edge_to_left(idx)) {
       turn_cost = kTCCrossing;
     } else {
-      turn_cost = (node->drive_on_right())
-                      ? kRightSideTurnCosts[static_cast<uint32_t>(edge->turntype(idx))]
-                      : kLeftSideTurnCosts[static_cast<uint32_t>(edge->turntype(idx))];
+      turn_cost = (node->drive_on_right()) ? kRightSideTurnCosts[static_cast<uint32_t>(turntype)]
+                                           : kLeftSideTurnCosts[static_cast<uint32_t>(turntype)];
     }
 
     if ((edge->use() != Use::kRamp && pred->use() == Use::kRamp) ||
         (edge->use() == Use::kRamp && pred->use() != Use::kRamp)) {
-      turn_cost += 1.5f;
+      turn_cost += kTCRamp;
       if (edge->roundabout())
-        turn_cost += 0.5f;
+        turn_cost += kTCRoundabout;
     }
 
     float seconds = turn_cost;
-    bool is_turn = false;
-    bool has_left = (edge->turntype(idx) == baldr::Turn::Type::kLeft ||
-                     edge->turntype(idx) == baldr::Turn::Type::kSharpLeft);
-    bool has_right = (edge->turntype(idx) == baldr::Turn::Type::kRight ||
-                      edge->turntype(idx) == baldr::Turn::Type::kSharpRight);
-    bool has_reverse = edge->turntype(idx) == baldr::Turn::Type::kReverse;
-
+    bool has_left =
+        (turntype == baldr::Turn::Type::kLeft || turntype == baldr::Turn::Type::kSharpLeft);
+    bool has_right =
+        (turntype == baldr::Turn::Type::kRight || turntype == baldr::Turn::Type::kSharpRight);
+    bool has_reverse = turntype == baldr::Turn::Type::kReverse;
+    bool is_turn = has_left || has_right || has_reverse;
     // Separate time and penalty when traffic is present. With traffic, edge speeds account for
     // much of the intersection transition time (TODO - evaluate different elapsed time settings).
     // Still want to add a penalty so routes avoid high cost intersections.
-    if (has_left || has_right || has_reverse) {
-      seconds *= edge->stopimpact(idx);
-      is_turn = true;
+    if (is_turn) {
+      seconds *= stopimpact;
     }
 
     AddUturnPenalty(idx, node, edge, has_reverse, has_left, has_right, false, InternalTurn::kNoTurn,
@@ -583,17 +629,22 @@ Cost MotorScooterCost::TransitionCostReverse(const uint32_t idx,
     // using traffic
     if (!has_measured_speed) {
       if (!is_turn)
-        seconds *= edge->stopimpact(idx);
-      seconds *= trans_density_factor_[node->density()];
+        seconds *= stopimpact;
+      seconds *= kTransDensityFactor[node->density()];
     }
     c.cost += seconds;
   }
+
+  // Account for the user preferring distance
+  c.cost *= inv_distance_factor_;
+
   return c;
 }
 
 void ParseMotorScooterCostOptions(const rapidjson::Document& doc,
                                   const std::string& costing_options_key,
-                                  Costing* c) {
+                                  Costing* c,
+                                  google::protobuf::RepeatedPtrField<CodedDescription>& warnings) {
   c->set_type(Costing::motor_scooter);
   c->set_name(Costing_Enum_Name(c->type()));
   auto* co = c->mutable_options();
@@ -601,10 +652,10 @@ void ParseMotorScooterCostOptions(const rapidjson::Document& doc,
   rapidjson::Value dummy;
   const auto& json = rapidjson::get_child(doc, costing_options_key.c_str(), dummy);
 
-  ParseBaseCostOptions(json, c, kBaseCostOptsConfig);
-  JSON_PBF_RANGED_DEFAULT(co, kTopSpeedRange, json, "/top_speed", top_speed);
-  JSON_PBF_RANGED_DEFAULT(co, kUseHillsRange, json, "/use_hills", use_hills);
-  JSON_PBF_RANGED_DEFAULT(co, kUsePrimaryRange, json, "/use_primary", use_primary);
+  ParseBaseCostOptions(json, c, kBaseCostOptsConfig, warnings);
+  JSON_PBF_RANGED_DEFAULT(co, kTopSpeedRange, json, "/top_speed", top_speed, warnings);
+  JSON_PBF_RANGED_DEFAULT(co, kUseHillsRange, json, "/use_hills", use_hills, warnings);
+  JSON_PBF_RANGED_DEFAULT(co, kUsePrimaryRange, json, "/use_primary", use_primary, warnings);
 }
 
 cost_ptr_t CreateMotorScooterCost(const Costing& costing_options) {
@@ -657,7 +708,10 @@ make_real_distributor_from_range(const ranged_default_t<T>& range) {
 template <typename T>
 std::uniform_int_distribution<T>* make_int_distributor_from_range(const ranged_default_t<T>& range) {
   T rangeLength = range.max - range.min;
-  return new std::uniform_int_distribution<T>(range.min - rangeLength, range.max + rangeLength);
+  return new std::uniform_int_distribution<T>(std::numeric_limits<T>::min() + rangeLength > range.min
+                                                  ? std::numeric_limits<T>::min()
+                                                  : range.min - rangeLength,
+                                              range.max + rangeLength);
 }
 
 TEST(MotorscooterCost, testMotorScooterCostParams) {
@@ -788,10 +842,5 @@ EXPECT_THAT(ctorTester->use_primary , test::IsBetween( kUsePrimaryRange.min ,kUs
 **/
 }
 } // namespace
-
-int main(int argc, char* argv[]) {
-  testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
-}
 
 #endif

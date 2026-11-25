@@ -1,10 +1,7 @@
 #ifndef VALHALLA_SIF_MOTORSCOOTERCOST_H_
 #define VALHALLA_SIF_MOTORSCOOTERCOST_H_
 
-#include <cstdint>
-
-#include <boost/property_tree/ptree.hpp>
-#include <valhalla/baldr/rapidjson_utils.h>
+#include <valhalla/baldr/rapidjson_fwd.h>
 #include <valhalla/proto/options.pb.h>
 #include <valhalla/sif/dynamiccost.h>
 
@@ -20,7 +17,8 @@ namespace sif {
  */
 void ParseMotorScooterCostOptions(const rapidjson::Document& doc,
                                   const std::string& costing_options_key,
-                                  Costing* pbf_costing);
+                                  Costing* pbf_costing,
+                                  google::protobuf::RepeatedPtrField<CodedDescription>& warnings);
 
 /**
  * Create motor scooter cost method. This is derived from auto costing and

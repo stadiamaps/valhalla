@@ -1,18 +1,12 @@
 #ifndef VALHALLA_MJOLNIR_SERVICEDAYS_H
 #define VALHALLA_MJOLNIR_SERVICEDAYS_H
 
-#include <cstdint>
-#include <ctime>
-#include <iomanip>
-#include <iostream>
-#include <locale>
-#include <memory>
-#include <sstream>
-#include <string>
-#include <vector>
-
 #include <valhalla/baldr/datetime.h>
 #include <valhalla/baldr/graphconstants.h>
+
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace valhalla {
 namespace mjolnir {
@@ -71,15 +65,6 @@ uint64_t remove_service_day(const uint64_t& days,
  * @return  Returns the updated days.
  */
 uint64_t shift_service_day(const uint64_t& days);
-
-/**
- * Get the month from the input string.Try to handle most inputs.
- * @param   month entered by a user
- * @return MONTH
- */
-baldr::MONTH get_month(const std::string& month);
-
-std::vector<uint64_t> get_time_range(const std::string& condition);
 
 } // namespace mjolnir
 } // namespace valhalla

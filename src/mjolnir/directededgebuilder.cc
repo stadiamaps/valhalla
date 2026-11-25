@@ -8,13 +8,11 @@ using namespace valhalla::baldr;
 namespace valhalla {
 namespace mjolnir {
 
-constexpr uint32_t kMinimumEdgeLength = 1;
-
 // Constructor with parameters
 DirectedEdgeBuilder::DirectedEdgeBuilder(const OSMWay& way,
                                          const GraphId& endnode,
                                          const bool forward,
-                                         const uint32_t length,
+                                         const double length,
                                          const uint32_t speed,
                                          const uint32_t truck_speed,
                                          const baldr::Use use,
@@ -26,15 +24,15 @@ DirectedEdgeBuilder::DirectedEdgeBuilder(const OSMWay& way,
                                          const bool minor,
                                          const uint32_t restrictions,
                                          const uint32_t bike_network,
-                                         const bool remove_destonly)
+                                         const bool reclass_ferry,
+                                         const baldr::RoadClass rc_hierarchy)
     : DirectedEdge() {
   set_endnode(endnode);
   set_use(use);
   set_speed(speed);             // KPH
   set_truck_speed(truck_speed); // KPH
 
-  // Protect against 0 length edges
-  set_length(std::max(length, kMinimumEdgeLength), true);
+  set_length(length);
 
   // Override use for ferries/rail ferries. TODO - set this in lua
   if (way.ferry() && way.use() != Use::kConstruction) {
@@ -52,12 +50,23 @@ DirectedEdgeBuilder::DirectedEdgeBuilder(const OSMWay& way,
 
   set_truck_route(way.truck_route());
 
-  // Set destination only to true if the remove_destonly is set to false and either destination only
-  // or no thru traffic is set. remove_destonly is set for reclassified paths due to ferries.
-  set_dest_only(!remove_destonly && (way.destination_only() || way.no_thru_traffic()));
-  if (remove_destonly && (way.destination_only() || way.no_thru_traffic())) {
-    LOG_DEBUG("Overriding dest_only attribution to false for ferry.");
+  if (rc_hierarchy < baldr::RoadClass::kInvalid) {
+    // hijack shortcut flag to indicate whether this needs to be moved in hierarchy builder
+    // will be reset there
+    set_hierarchy_roadclass(rc_hierarchy);
   }
+
+  // Ferries should never be set to destination only. For other paths, set destination only to true
+  // if we didn't reclassify for ferry and either destination only or no thru traffic is set.
+  if (way.ferry()) {
+    set_dest_only(false);
+  } else {
+    set_dest_only(!reclass_ferry && (way.destination_only() || way.no_thru_traffic()));
+    if (reclass_ferry && (way.destination_only() || way.no_thru_traffic())) {
+      LOG_DEBUG("Overriding dest_only attribution to false for ferry.");
+    }
+  }
+
   set_dest_only_hgv(way.destination_only_hgv());
   set_dismount(way.dismount());
   set_use_sidepath(way.use_sidepath());
@@ -159,7 +168,8 @@ DirectedEdgeBuilder::DirectedEdgeBuilder(const OSMWay& way,
   if ((way.pedestrian_forward() && !forward) || (way.pedestrian_backward() && forward)) {
     reverse_access |= kPedestrianAccess;
   }
-  if (way.use() != Use::kSteps && way.use() != Use::kConstruction) {
+  if (way.use() != Use::kSteps && way.use() != Use::kLadder && way.use() != Use::kConstruction &&
+      way.surface() != Surface::kImpassable) {
     if (way.wheelchair_tag() && way.wheelchair()) {
       forward_access |= kWheelchairAccess;
       reverse_access |= kWheelchairAccess;

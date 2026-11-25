@@ -1,6 +1,12 @@
 #include "thor/optimizer.h"
 #include "midgard/logging.h"
 
+#include <algorithm>
+
+namespace {
+constexpr size_t kInterruptIterationsInterval = 10000;
+}
+
 namespace valhalla {
 namespace thor {
 
@@ -95,6 +101,10 @@ uint32_t Optimizer::Anneal(const std::vector<float>& costs, float temperature) {
     if (success_count >= successes_) {
       break;
     }
+    // Allow this process to be aborted
+    if (interrupt_ && (i % kInterruptIterationsInterval) == 0) {
+      (*interrupt_)();
+    }
   }
   return success_count;
 }
@@ -176,6 +186,10 @@ float Optimizer::TourCost(const std::vector<float>& costs, const std::vector<uin
     c += costs[(tour[i] * count_) + tour[i + 1]];
   }
   return c;
+}
+
+void Optimizer::set_interrupt(const std::function<void()>* interrupt_callback) {
+  interrupt_ = interrupt_callback;
 }
 
 } // namespace thor

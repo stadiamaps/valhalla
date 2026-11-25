@@ -1,4 +1,3 @@
-#include "midgard/util.h"
 #include "thor/worker.h"
 #include "tyr/serializers.h"
 
@@ -13,7 +12,7 @@ std::string thor_worker_t::isochrones(Api& request) {
   auto _ = measure_scope_time(request);
 
   auto& options = *request.mutable_options();
-  adjust_scores(options);
+  adjust_locations(request);
   auto costing = parse_costing(request);
 
   // name of the metric (time/distance, value, color)

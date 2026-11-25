@@ -18,16 +18,26 @@ Valhalla is an open source routing engine and accompanying libraries for use wit
 
 ## Build Status
 
-| Linux/MacOs | Windows | Code Coverage |
-| ----------- | ------- | ------------- |
-| [![Circle CI](https://circleci.com/gh/valhalla/valhalla/tree/master.svg?style=svg)](https://circleci.com/gh/valhalla/valhalla/tree/master) | [![Windows CI](https://github.com/valhalla/valhalla/actions/workflows/win.yml/badge.svg)](https://github.com/valhalla/valhalla/actions/workflows/win.yml) | [![codecov](https://codecov.io/gh/valhalla/valhalla/branch/master/graph/badge.svg)](https://codecov.io/gh/valhalla/valhalla) |
+| Linux | macOS | Windows | Code Coverage | Timezone DB |
+| ----- | ----- | ------- | ------------- | ----------- |
+| [![Build Linux](https://github.com/valhalla/valhalla/actions/workflows/linux.yml/badge.svg)](https://github.com/valhalla/valhalla/actions/workflows/linux.yml) | [![Build OSX](https://github.com/valhalla/valhalla/actions/workflows/osx.yml/badge.svg)](https://github.com/valhalla/valhalla/actions/workflows/osx.yml) | [![Build Windows](https://github.com/valhalla/valhalla/actions/workflows/windows.yml/badge.svg)](https://github.com/valhalla/valhalla/actions/workflows/windows.yml) | [![codecov](https://codecov.io/gh/valhalla/valhalla/branch/master/graph/badge.svg)](https://codecov.io/gh/valhalla/valhalla) | [![timezone_db](https://img.shields.io/badge/tzdb%20version-2025c-blue.svg)](https://github.com/valhalla/valhalla/actions/workflows/publish_tz_db.yml) |
 
+## Generative AI usage
+
+While we absolutely accept AI usage for Valhalla (and its related projects), we require the following guidelines to be followed:
+
+1. The human developer understood every line of code written and verifies that the proposed implementation is actually working
+2. PR description (re-)written by a human is non-negotiable
+3. contrived AI logic with weird generic variable names should be rewritten to match human perception
+4. non-obvious code changes should be commented on _inline_ (not in the PR description!)
+
+2\. & 3. are pretty subjective, where we have a lot more patience. However, PRs ignoring these guidelines entirely, might be closed without further notice. And the worst offenders might get blocked from the Valhalla organization.
 
 ## License
 
-Valhalla, and all of the projects under the Valhalla organization, use the [MIT License](COPYING).  Avatar/logo by [Jordan](https://www.jaykaydraws.com/portfolio). 
+Valhalla, and all of the projects under the Valhalla organization, use the [MIT License](https://github.com/valhalla/valhalla/blob/master/COPYING).  Avatar/logo by [Jordan](https://www.jaykaydraws.com/portfolio). 
 
-OpenStreetMap data in the `./test/data` is licensed under [ODbL](https://opendatacommons.org/licenses/odbl/) and [copyrighted](https://www.openstreetmap.org/copyright) by OSM contributors. Additional information on licenses and other requirements concerning the data sources most frequently used by Valhalla can be found in [the docs](https://valhalla.github.io/valhalla/mjolnir/data_sources/).
+OpenStreetMap data in the `./test/data` is licensed under [ODbL](https://opendatacommons.org/licenses/odbl/) and [copyrighted](https://www.openstreetmap.org/copyright) by OSM contributors. Additional information on licenses and other requirements concerning the data sources most frequently used by Valhalla can be found in [the docs](https://valhalla.github.io/valhalla/contributing/data/data-sources/).
 
 ## Overview
 
@@ -42,7 +52,10 @@ There are several key features that we hope can differentiate the Valhalla proje
 
 ## Demo Server
 
-[FOSSGIS e.V.](https://fossgis.de) hosts a demo server which is open to the public and includes a full planet graph with an [open-source web app](https://github.com/gis-ops/valhalla-app) on https://valhalla.openstreetmap.de. The HTTP API is accessible on a slightly different subdomain, e.g. https://valhalla1.openstreetmap.de/isochrone. Usage of the demo server follows the usual fair-usage policy as OSRM & Nominatim demo servers (somewhat enforced by [rate limits](https://github.com/valhalla/valhalla/discussions/3373#discussioncomment-1644713)).
+[FOSSGIS e.V.](https://fossgis.de) hosts a demo server which is open to the public and includes a full planet graph with an [open-source web app](https://github.com/gis-ops/valhalla-app) on <https://valhalla.openstreetmap.de>. The HTTP API is accessible on a slightly different subdomain, e.g. <https://valhalla1.openstreetmap.de/isochrone>. Usage of the demo server follows the usual fair-usage policy as OSRM & Nominatim demo servers (somewhat enforced by [rate limits](https://github.com/valhalla/valhalla/discussions/3373#discussioncomment-1644713)).
+
+> [!NOTE]
+> In case you **publish apps to end users** (be it mobile, web or desktop) which request to the public demo server, we'd ask you to let us know via Github Discussions and to include an identifying `X-Client-Id` request header, e.g. `X-Client-Id: newroutingapp.io`.
 
 ## Platform Compatibility
 
@@ -77,29 +90,62 @@ Documentation is stored in the `docs/` folder in this GitHub repository. It can 
 
 ## Installation
 
-To run Valhalla locally or your own server, we recommend using our Docker image. Checkout our docker image here: https://github.com/orgs/valhalla/packages. Also, there's a [community Docker image](https://github.com/gis-ops/docker-valhalla) with more "magic" than the native one.
-
-If you want to build Valhalla from source, follow the [documentation](https://valhalla.github.io/valhalla/building/).
-
 For more information on binaries, see [Command Line Tools](#command-line-tools) section below and the [docs](https://valhalla.github.io/valhalla).
+
+### From source
+
+If you want to build Valhalla from source, follow the [documentation](https://valhalla.github.io/valhalla/start/building/).
+
+### With docker
+
+[![Test & Publish Docker image](https://github.com/valhalla/valhalla/actions/workflows/docker-build.yml/badge.svg)](https://github.com/orgs/valhalla/packages?repo_name=valhalla)
+
+To run Valhalla locally or your own server, we recommend using one of our [Docker images](https://github.com/orgs/valhalla/packages), see the [README](https://github.com/valhalla/valhalla/blob/master/docker/README.md).
+
+### Via Python bindings
+
+[![pyvalhalla version](https://img.shields.io/pypi/v/pyvalhalla?label=pyvalhalla)](https://pypi.org/project/pyvalhalla/)
+
+We publish our (very) high-level Python bindings to PyPI with [`pyvalhalla`](https://pypi.org/project/pyvalhalla/).
+
+The Python packages don't only contain the Python bindings, they also provide access to the C++ executables, e.g. in the form of `python -m valhalla valhalla_build_tiles -h`. For more details, see the [Python README](https://valhalla.github.io/valhalla/bindings/python/).
+
+To install the native C++ executables one doesn't even need to have root permissions or even have Python installed. Simply download the desired wheel from [PyPI](https://pypi.org/project/pyvalhalla), extract it with e.g. `unzip` and run the included `valhalla/bin/<binary>` directly.
+
+### Via NodeJS bindings
+
+[![npm version](https://img.shields.io/npm/v/@valhallajs/valhallajs/latest?label=@valhallajs/valhallajs@latest)](https://www.npmjs.com/package/@valhallajs/valhallajs) [![npm version](https://img.shields.io/npm/v/@valhallajs/valhallajs/weekly?label=@valhallajs/valhallajs@weekly)](https://www.npmjs.com/package/@valhallajs/valhallajs)
+
+We provide high-level NodeJS binding:
+
+```bash
+npm install @valhallajs/valhallajs
+```
+
+For more details, see the [NodeJS README](https://github.com/valhalla/valhalla/blob/master/src/bindings/nodejs/README.md).
+
+### Via Rust bindings
+
+[![crates.io version](https://img.shields.io/crates/v/valhalla?label=valhalla)](https://crates.io/crates/valhalla)
+
+We publish Rust bindings to crates.io with [`valhalla`](https://crates.io/crates/valhalla), which builds Valhalla from source:
+
+```bash
+cargo add valhalla
+```
+
+For more details, see the [Rust README](https://github.com/valhalla/valhalla/blob/master/src/bindings/rust/README.md).
 
 ## Contributing
 
-We :heart: contributions to Valhalla. They could be non-technical, e.g. translations into other languages via [Transifex](https://www.transifex.com/valhalla/valhalla-phrases/locales-en-us-json--transifex/) or documentation improvements, or technical ones like bug fixes or feature implementations. It's important to open an issue before setting out to work on a PR.
+We :heart: contributions to Valhalla. They could be non-technical, e.g. translations into other languages (see [`locales/`](https://github.com/valhalla/valhalla/tree/master/locales)) or documentation improvements, or technical ones like bug fixes or feature implementations. It's important to open an issue before setting out to work on a PR.
 
 Ideally, get familiar with our [Contribution guidelines](https://github.com/valhalla/valhalla/blob/master/CONTRIBUTING.md) first.
 
-## Benchmarks
-
-Valhalla includes several microbenchmarks which you can build and run using:
-
-    make benchmarks
-    make run-benchmarks
-
-They are enabled by the `-DENABLE_BENCHMARKS=On` CMake flag and are currently only available for
-Linux and MacOS.
-
 ## Command Line Tools
+
+> [!TIP]
+> Easily install various Valhalla command line tools like `valhalla_build_tiles` or `valhalla_service` with the [Python bindings](https://valhalla.github.io/valhalla/bindings/python/).
 
 ### `valhalla_service` aka one-shot mode
 
@@ -113,7 +159,6 @@ valhalla_service valhalla.json isochrone isochrone_request.txt
 
 It's important to note that all Valhalla logs for one-shot mode are piped to `stderr` while the actual JSON response will be in `stdout`. To completely silence the logs, pass `type: ""` to `midgard.logging` in the config file.
 
-
 ### Batch Script Tool
 
 - [Batch Run_Route](https://github.com/valhalla/valhalla/blob/master/run_route_scripts/README.md)
@@ -123,12 +168,10 @@ It's important to note that all Valhalla logs for one-shot mode are piped to `st
 The following projects are open-source and built with the intention to make it easier to use Valhalla and its features:
 
 - [**OpenStreetMapSpeeds**](https://github.com/OpenStreetMapSpeeds/): A project conflating open GPS data to improve Valhalla's speed classification. The current JSON is from early 2022 and can be downloaded [here](https://raw.githubusercontent.com/OpenStreetMapSpeeds/schema/master/default_speeds.json) and used by setting the path in the `mjolnir.default_speeds_config` config option.
-- [**docker-valhalla**](https://github.com/gis-ops/docker-valhalla): An easy-to-use, relatively magical Docker image for Valhalla, which only requires setting a few environment variables in `docker-compose.yml` to get a full-featured Valhalla instance.
 - [**valhalla-operator**](https://github.com/itayankri/valhalla-operator): A k8s operator to deploy and manage Valhalla.
-- [**valhalla-app**](https://github.com/gis-ops/valhalla-app): A React based web app for Valhalla, powering https://valhalla.openstreetmap.de/.
-- [**valhalla-qgis-plugin**](https://github.com/gis-ops/valhalla-qgis-plugin): A QGIS plugin for Valhalla, also available in the [official QGIS plugin store](https://plugins.qgis.org/plugins/valhalla/). **Note**, it's almost deprecated and will be replaced with a much superior alternative.
+- [**valhalla-app**](https://github.com/gis-ops/valhalla-app): A React based web app for Valhalla, powering <https://valhalla.openstreetmap.de/>.
+- [**valhalla-qgis-plugin**](https://github.com/gis-ops/valhalla-qgis-plugin): A QGIS plugin for Valhalla, also available in the [official QGIS plugin store](https://plugins.qgis.org/plugins/valhalla/), featuring built-in `valhalla_service` and `valhalla_build_tiles`.
 - [**routingpy**](https://github.com/gis-ops/routingpy): A Python client for most open-source routing engines, including Valhalla, with a common interface for all engines. Available on [PyPI](https://pypi.org/project/routingpy/).
 - [**routingjs**](https://github.com/gis-ops/routingjs): A TypeScript client for most open-source routing engines, including Valhalla, with a common interface for all engines. Available as engine-specific packages on [npm](https://www.npmjs.com/package/@routingjs/valhalla).
-- [**pyvalhalla**](https://github.com/gis-ops/pyvalhalla): Python bindings for Valhalla, so its APIs can be used from within Python without a HTTP service. Available on [PyPI](https://pypi.org/project/pyvalhalla/).
 - [**Valhalla_jll.jl**](https://github.com/JuliaBinaryWrappers/Valhalla_jll.jl): Valhalla binaries shipped for Julia.
-- [**valhalla-go**](https://github.com/pufferffish/valhalla-go): Valhalla Golang bindings via cgo
+- [**valhalla-mobile**](https://github.com/Rallista/valhalla-mobile): A wrapper library for valhalla on iOS (Swift) and (Android) Kotlin. Released through Swift Package Manager and Maven Central.

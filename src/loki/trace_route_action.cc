@@ -1,16 +1,11 @@
 #include "loki/search.h"
 #include "loki/worker.h"
-
-#include "baldr/rapidjson_utils.h"
-#include "midgard/encoded.h"
-#include "midgard/logging.h"
 #include "midgard/pointll.h"
-#include "tyr/actor.h"
+#include "worker.h"
 
 #include <cmath>
 
 using namespace valhalla;
-using namespace valhalla::tyr;
 using namespace valhalla::baldr;
 using namespace valhalla::midgard;
 using namespace valhalla::loki;
@@ -27,7 +22,7 @@ void check_shape(const google::protobuf::RepeatedPtrField<valhalla::Location>& s
   if (shape.size() < 2) {
     throw valhalla_exception_t{123};
     // Validate shape is not larger than the configured max
-  } else if (shape.size() > max_shape) {
+  } else if (shape.size() > static_cast<int>(max_shape)) {
     throw valhalla_exception_t{153, "(" + std::to_string(shape.size()) + "). The limit is " +
                                         std::to_string(max_shape)};
   };
@@ -65,28 +60,12 @@ void check_distance(const google::protobuf::RepeatedPtrField<valhalla::Location>
   }
 }
 
-void check_best_paths(unsigned int best_paths, unsigned int max_best_paths) {
-
-  // Validate the best paths count is not less than 1
-  if (best_paths < 1) {
-    throw valhalla_exception_t{158, "(" + std::to_string(best_paths) +
-                                        "). The best_paths lower limit is 1"};
-  };
-
-  // Validate the best paths count is not larger than the configured best paths max
-  if (best_paths > max_best_paths) {
-    throw valhalla_exception_t{158, "(" + std::to_string(best_paths) +
-                                        "). The best_paths upper limit is " +
-                                        std::to_string(max_best_paths)};
-  }
-}
-
 void check_alternates_shape(unsigned int alternates,
                             const google::protobuf::RepeatedPtrField<valhalla::Location>& shape,
                             size_t max_alternates_shape) {
 
   // Validate shape is not larger than the configured best paths shape max
-  if ((alternates > 1) && (shape.size() > max_alternates_shape)) {
+  if ((alternates > 1) && (shape.size() > static_cast<int>(max_alternates_shape))) {
     throw valhalla_exception_t{153, "(" + std::to_string(shape.size()) +
                                         "). The best paths shape limit is " +
                                         std::to_string(max_alternates_shape)};
@@ -118,6 +97,7 @@ namespace loki {
 
 void loki_worker_t::init_trace(Api& request) {
   parse_costing(request);
+  // parse_locations(request.mutable_options()->mutable_shape(), request);
   auto& options = *request.mutable_options();
 
   // check distance for hierarchy pruning
@@ -175,14 +155,8 @@ void loki_worker_t::trace(Api& request) {
 // actually use the display_ll now as its  used in loki::Search
 void loki_worker_t::locations_from_shape(Api& request) {
   auto& options = *request.mutable_options();
-  std::vector<baldr::Location> locations{PathLocation::fromPBF(*options.shape().begin()),
-                                         PathLocation::fromPBF(*options.shape().rbegin())};
-  locations.front().node_snap_tolerance_ = 0.f;
-  locations.front().radius_ = 10;
-  locations.back().node_snap_tolerance_ = 0.f;
-  locations.back().radius_ = 10;
+  auto* shape = request.mutable_options()->mutable_shape();
 
-  // Add first and last correlated locations to request
   try {
     // If trace route has 2 locations get the lat,lng of the first and last so we can support
     // side of street.
@@ -193,15 +167,19 @@ void loki_worker_t::locations_from_shape(Api& request) {
       orig_ll = {options.locations(0).ll().lng(), options.locations(0).ll().lat()};
       dest_ll = {options.locations(1).ll().lng(), options.locations(1).ll().lat()};
     }
+    // Add first and last correlated locations to request
+    options.mutable_locations()->Clear();
+    options.mutable_locations()->Add()->CopyFrom(*shape->begin());
+    options.mutable_locations()->Add()->CopyFrom(*shape->rbegin());
+
+    for (auto& location : *options.mutable_locations()) {
+      apply_trace_location_defaults(location);
+    }
+    parse_locations(options.mutable_locations(), request);
 
     // Project first and last shape point onto nearest edge(s). Clear current locations list
     // and set the path locations
-    auto projections = loki::Search(locations, *reader, costing);
-    options.clear_locations();
-    PathLocation::toPBF(projections.at(locations.front()), options.mutable_locations()->Add(),
-                        *reader);
-    PathLocation::toPBF(projections.at(locations.back()), options.mutable_locations()->Add(),
-                        *reader);
+    search_.search(*options.mutable_locations(), mode_costing[static_cast<size_t>(mode)]);
 
     // If locations were provided, backfill the origin and dest lat,lon and update
     // side of street on associated edges. TODO - create a constant for side of street
@@ -262,7 +240,9 @@ void loki_worker_t::locations_from_shape(Api& request) {
                                                       : valhalla::Location::kRight);
       }
     }
-  } catch (const std::exception&) { throw valhalla_exception_t{171}; }
+  } catch (const valhalla_exception_t& e) { throw e; } catch (const std::exception&) {
+    throw valhalla_exception_t{171};
+  }
 }
 
 } // namespace loki

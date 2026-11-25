@@ -1,7 +1,6 @@
-
 #include "baldr/directededge.h"
 
-#include "test.h"
+#include <gtest/gtest.h>
 
 using namespace std;
 using namespace valhalla::baldr;
@@ -102,6 +101,26 @@ TEST(DirectedEdge, TestMaxSlope) {
 
   edge.set_max_down_slope(-15.7f);
   EXPECT_EQ(edge.max_down_slope(), -16);
+}
+
+TEST(DirectedEdge, TestLength) {
+  DirectedEdge edge;
+
+  // Zero-length
+  edge.set_length(0.0);
+  EXPECT_EQ(edge.length(), 1);
+
+  // Rounding
+  edge.set_length(3.0);
+  EXPECT_EQ(edge.length(), 3);
+  edge.set_length(3.3);
+  EXPECT_EQ(edge.length(), 3);
+  edge.set_length(3.5);
+  EXPECT_EQ(edge.length(), 4);
+
+  // Too long
+  EXPECT_ANY_THROW(edge.set_length(16777215.9));
+  EXPECT_ANY_THROW(edge.set_length(333.0e20));
 }
 
 } // namespace

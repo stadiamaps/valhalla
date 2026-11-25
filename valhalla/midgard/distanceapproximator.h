@@ -2,9 +2,9 @@
 #ifndef VALHALLA_MIDGARD_DISTANCEAPPROXIMATOR_H_
 #define VALHALLA_MIDGARD_DISTANCEAPPROXIMATOR_H_
 
-#include <cmath>
-
 #include <valhalla/midgard/constants.h>
+
+#include <cmath>
 
 namespace valhalla {
 namespace midgard {
@@ -61,6 +61,14 @@ public:
    */
   typename PointT::first_type GetLngScale() const {
     return m_lng_scale_;
+  }
+
+  /*
+   * Getter for lng scale
+   * @return the distance scale for lng at this points latitude
+   */
+  typename PointT::first_type GetMetersPerLngDegree() const {
+    return m_per_lng_degree_;
   }
 
   /**

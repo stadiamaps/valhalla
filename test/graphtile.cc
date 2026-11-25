@@ -1,12 +1,22 @@
-#include <cstdint>
-
 #include "baldr/graphtile.h"
+#include "baldr/complexrestriction.h"
+#include "baldr/tilegetter.h"
+#include "config.h"
+#include "midgard/pointll.h"
+#include "midgard/tiles.h"
+#include "mjolnir/complexrestrictionbuilder.h"
 
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <filesystem>
+#include <sstream>
+#include <string>
+#include <tuple>
 #include <vector>
 
-#include "test.h"
-
 using namespace valhalla::baldr;
+using namespace valhalla::midgard;
 
 namespace {
 
@@ -36,30 +46,34 @@ TEST(Graphtile, FileSuffix) {
   TileLevel level{7, valhalla::baldr::RoadClass::kSecondary, "half_degree_is_a_multiple_of_3",
                   Tiles<PointLL>{{{-180, -90}, {180, 90}}, .5, 1}};
 
-  EXPECT_EQ(GraphTile::FileSuffix(GraphId(1234, 7, 0), ".qux", false, &level), "7/001/234.qux");
-  EXPECT_EQ(GraphTile::FileSuffix(GraphId(123456, 7, 0), ".qux", false, &level), "7/123/456.qux");
+  EXPECT_EQ(GraphTile::FileSuffix(GraphId(1234, 7, 0), ".qux", &level), "7/001/234.qux");
+  EXPECT_EQ(GraphTile::FileSuffix(GraphId(123456, 7, 0), ".qux", &level), "7/123/456.qux");
 }
 
 TEST(Graphtile, IdFromString) {
-  EXPECT_EQ(GraphTile::GetTileId("foo/bar/baz/qux/corge/1/000/002.gph"), GraphId(2, 1, 0));
-  EXPECT_EQ(GraphTile::GetTileId("foo2/8675309/bar/1baz2/qux42corge/1/000/002.gph"),
+  EXPECT_EQ(GraphId::FromTilePath("foo/bar/baz/qux/corge/1/000/002.gph"), GraphId(2, 1, 0));
+  EXPECT_EQ(GraphId::FromTilePath("foo2/8675309/bar/1baz2/qux42corge/1/000/002.gph"),
             GraphId(2, 1, 0));
-  EXPECT_EQ(GraphTile::GetTileId("foo2/8675309/bar/1baz2/qux42corge/2/001/000/002.gph"),
+  EXPECT_EQ(GraphId::FromTilePath("foo2/8675309/bar/1baz2/qux42corge/2/001/000/002.gph"),
             GraphId(1000002, 2, 0));
-  EXPECT_EQ(GraphTile::GetTileId("foo2/8675309/bar/1baz2/qux42corge/3/001/000/002.gph"),
+  EXPECT_EQ(GraphId::FromTilePath("foo2/8675309/bar/1baz2/qux42corge/3/001/000/002.gph"),
             GraphId(1000002, 3, 0));
-  EXPECT_EQ(GraphTile::GetTileId("foo2/8675309/bar/1baz2/qux42corge/3/001/000/002"),
+  EXPECT_EQ(GraphId::FromTilePath("foo2/8675309/bar/1baz2/qux42corge/3/001/000/002"),
             GraphId(1000002, 3, 0));
-  EXPECT_EQ(GraphTile::GetTileId("2/000/791/317.gph.gz"), GraphId(791317, 2, 0));
+  EXPECT_EQ(GraphId::FromTilePath("2/000/791/317.gph.gz"), GraphId(791317, 2, 0));
+#ifdef _WIN32
+  // backslash is a separator only on windows; the path lib normalizes it to forward slash
+  EXPECT_EQ(GraphId::FromTilePath("foo\\bar\\1\\000\\002.gph"), GraphId(2, 1, 0));
+  EXPECT_EQ(GraphId::FromTilePath("foo\\bar/2/001\\000/002.gph"), GraphId(1000002, 2, 0));
+#endif
 
-  EXPECT_THROW(GraphTile::GetTileId("foo2/8675309/bar/1baz2/qux42corge/1/000/002/.gph"),
+  EXPECT_THROW(GraphId::FromTilePath("foo2/8675309/bar/1baz2/qux42corge/1/000/002/.gph"),
                std::runtime_error);
-  EXPECT_THROW(GraphTile::GetTileId("foo2/8675309/bar/1baz2/qux42corge/0/004/050.gph"),
+  EXPECT_THROW(GraphId::FromTilePath("foo2/8675309/bar/1baz2/qux42corge/0/004/050.gph"),
                std::runtime_error);
-  EXPECT_THROW(GraphTile::GetTileId("foo/bar/0/004/0-1.gph"), std::runtime_error);
-  EXPECT_THROW(GraphTile::GetTileId("foo/bar/0/004//001.gph"), std::runtime_error);
-  EXPECT_THROW(GraphTile::GetTileId("foo/bar/1/000/004/001.gph"), std::runtime_error);
-  EXPECT_THROW(GraphTile::GetTileId("00/002.gph"), std::runtime_error);
+  EXPECT_THROW(GraphId::FromTilePath("foo/bar/0/004/0-1.gph"), std::runtime_error);
+  EXPECT_THROW(GraphId::FromTilePath("foo/bar/1/000/004/001.gph"), std::runtime_error);
+  EXPECT_THROW(GraphId::FromTilePath("00/002.gph"), std::runtime_error);
 }
 
 TEST(Graphtile, Bin) {
@@ -77,7 +91,7 @@ TEST(Graphtile, Bin) {
   }
   testable_graphtile t(offsets, bins);
   for (size_t i = 0; i < kBinCount; ++i) {
-    valhalla::midgard::iterable_t<GraphId> itr(bins.data() + offs[i], bins.data() + offs[i + 1]);
+    std::span<GraphId> itr(bins.data() + offs[i], bins.data() + offs[i + 1]);
     auto idx_itr = t.GetBin(i);
     auto rc_itr = t.GetBin(i % kBinsDim, i / kBinsDim);
 
@@ -126,6 +140,258 @@ TEST(GraphTileIntegrity, SizeLessThanPayload) {
 
   EXPECT_THROW(GraphTile::Create(GraphId(), std::make_unique<const TestGraphMemory>(tile_size)),
                std::runtime_error);
+}
+
+class body_tile_getter_t : public tile_getter_t {
+public:
+  body_tile_getter_t(std::vector<char> body, bool gzipped)
+      : body_(std::move(body)), gzipped_(gzipped) {
+  }
+
+  GET_response_t get(const std::string&, const uint64_t, const uint64_t) override {
+    return {body_, status_code_t::SUCCESS, 200};
+  }
+
+  HEAD_response_t head(const std::string&, header_mask_t) override {
+    return {};
+  }
+
+  bool gzipped() const override {
+    return gzipped_;
+  }
+
+private:
+  std::vector<char> body_;
+  bool gzipped_;
+};
+
+std::vector<char> header_only_tile(uint64_t end_offset) {
+  GraphTileHeader header;
+  header.set_end_offset(end_offset);
+  std::vector<char> tile(sizeof(header));
+  memcpy(tile.data(), &header, sizeof(header));
+  return tile;
+}
+
+TEST(GraphTileIntegrity, DownloadThatIsNotATileIsNotCached) {
+  const std::string page = "<html>sign in</html>";
+  const std::vector<char> html(page.begin(), page.end());
+  const std::vector<std::tuple<std::string, std::vector<char>, bool>> bodies = {
+      {"html", html, false},
+      {"truncated tile", header_only_tile(sizeof(GraphTileHeader) + 1), false},
+      {"empty", {}, false},
+      {"html as gzip", html, true},
+  };
+  const std::filesystem::path tile_dir = "test/data/cache_tile_url";
+  for (const auto& [name, body, gzipped] : bodies) {
+    SCOPED_TRACE(name);
+    std::filesystem::remove_all(tile_dir);
+    body_tile_getter_t getter(body, gzipped);
+    EXPECT_EQ(GraphTile::CacheTileURL("http://tiles.invalid/{tilePath}", GraphId(746, 2, 0), &getter,
+                                      tile_dir.string()),
+              nullptr);
+    EXPECT_FALSE(std::filesystem::exists(tile_dir));
+  }
+}
+
+TEST(GraphTileIntegrity, DownloadedTileIsCached) {
+  const std::filesystem::path tile_dir = "test/data/cache_tile_url";
+  std::filesystem::remove_all(tile_dir);
+  body_tile_getter_t getter(header_only_tile(sizeof(GraphTileHeader)), false);
+  const GraphId tile_id(746, 2, 0);
+  EXPECT_NE(GraphTile::CacheTileURL("http://tiles.invalid/{tilePath}", tile_id, &getter,
+                                    tile_dir.string()),
+            nullptr);
+  EXPECT_TRUE(std::filesystem::exists(tile_dir / GraphTile::FileSuffix(tile_id)));
+}
+
+TEST(GraphTileVersion, VersionChecksum) {
+  std::string tile_dir = VALHALLA_BUILD_DIR "test/data/utrecht_tiles";
+
+  auto tile = GraphTile::Create(tile_dir, {3196, 0, 0});
+
+  std::string expected_version = VALHALLA_VERSION;
+  EXPECT_TRUE(tile->header()->version().compare(0, expected_version.size(), expected_version) == 0);
+
+  auto checksum = tile->header()->tile_checksum();
+  EXPECT_GT(checksum, 0);
+}
+
+struct RestrictionBuilder {
+  std::vector<char> data;
+
+  void add_restriction(GraphId from_id,
+                       GraphId to_id,
+                       uint16_t modes,
+                       const std::vector<GraphId>& vias = {}) {
+    valhalla::mjolnir::ComplexRestrictionBuilder builder;
+    builder.set_from_id(from_id);
+    builder.set_to_id(to_id);
+    builder.set_modes(modes);
+    if (!vias.empty()) {
+      builder.set_via_list(vias);
+    }
+
+    std::ostringstream oss;
+    oss << builder;
+    std::string serialized = oss.str();
+
+    data.insert(data.end(), serialized.begin(), serialized.end());
+  }
+};
+
+TEST(ComplexRestrictionView, EmptyView) {
+  std::vector<char> empty_data;
+  ComplexRestrictionView view(empty_data.data(), 0, GraphId(100, 0, 0), 0xFF, true);
+
+  EXPECT_TRUE(view.empty());
+  EXPECT_EQ(view.begin(), view.end());
+
+  int count = 0;
+  for (const auto& cr : view) {
+    (void)cr;
+    count++;
+  }
+  EXPECT_EQ(count, 0);
+}
+
+TEST(ComplexRestrictionView, NoMatchingRestrictions) {
+  RestrictionBuilder builder;
+  builder.add_restriction(GraphId(1, 0, 0), GraphId(2, 0, 0), 0x1);
+  builder.add_restriction(GraphId(3, 0, 0), GraphId(4, 0, 0), 0x2);
+  builder.add_restriction(GraphId(5, 0, 0), GraphId(6, 0, 0), 0x4);
+
+  // Looking for to_graphid = 100 (doesn't exist)
+  ComplexRestrictionView view(builder.data.data(), builder.data.size(), GraphId(100, 0, 0), 0xFF,
+                              true);
+
+  EXPECT_TRUE(view.empty());
+  EXPECT_EQ(view.begin(), view.end());
+}
+
+TEST(ComplexRestrictionView, ForwardRestrictions) {
+  RestrictionBuilder builder;
+  builder.add_restriction(GraphId(1, 0, 0), GraphId(100, 0, 0), 0x1); // matches
+  builder.add_restriction(GraphId(2, 0, 0), GraphId(200, 0, 0), 0x2); // doesn't match id
+  builder.add_restriction(GraphId(3, 0, 0), GraphId(100, 0, 0), 0x4); // matches
+  builder.add_restriction(GraphId(4, 0, 0), GraphId(100, 0, 0), 0x8); // doesn't match modes
+
+  // Looking for to_graphid = 100, modes = 0x5 (matches modes 0x1 and 0x4)
+  ComplexRestrictionView view(builder.data.data(), builder.data.size(), GraphId(100, 0, 0), 0x5,
+                              true);
+
+  EXPECT_FALSE(view.empty());
+
+  std::vector<const ComplexRestriction*> results;
+  for (const auto& cr : view) {
+    results.push_back(&cr);
+  }
+
+  ASSERT_EQ(results.size(), 2);
+  EXPECT_EQ(results[0]->to_graphid(), GraphId(100, 0, 0));
+  EXPECT_EQ(results[0]->from_graphid(), GraphId(1, 0, 0));
+  EXPECT_EQ(results[1]->to_graphid(), GraphId(100, 0, 0));
+  EXPECT_EQ(results[1]->from_graphid(), GraphId(3, 0, 0));
+}
+
+TEST(ComplexRestrictionView, ReverseRestrictions) {
+  RestrictionBuilder builder;
+  builder.add_restriction(GraphId(100, 0, 0), GraphId(1, 0, 0), 0x1); // matches
+  builder.add_restriction(GraphId(200, 0, 0), GraphId(2, 0, 0), 0x2); // doesn't match id
+  builder.add_restriction(GraphId(100, 0, 0), GraphId(3, 0, 0), 0x4); // matches
+
+  // Looking for from_graphid = 100 (reverse direction), modes = 0xFF
+  ComplexRestrictionView view(builder.data.data(), builder.data.size(), GraphId(100, 0, 0), 0xFF,
+                              false);
+
+  EXPECT_FALSE(view.empty());
+
+  std::vector<const ComplexRestriction*> results;
+  for (const auto& cr : view) {
+    results.push_back(&cr);
+  }
+
+  ASSERT_EQ(results.size(), 2);
+  EXPECT_EQ(results[0]->from_graphid(), GraphId(100, 0, 0));
+  EXPECT_EQ(results[1]->from_graphid(), GraphId(100, 0, 0));
+}
+
+TEST(ComplexRestrictionView, ViewInterfaceMethods) {
+  RestrictionBuilder builder;
+  builder.add_restriction(GraphId(1, 0, 0), GraphId(100, 0, 0), 0x1);
+  builder.add_restriction(GraphId(2, 0, 0), GraphId(100, 0, 0), 0x2);
+
+  ComplexRestrictionView view(builder.data.data(), builder.data.size(), GraphId(100, 0, 0), 0xFF,
+                              true);
+
+  EXPECT_FALSE(view.empty());
+  const auto& first = view.front();
+  EXPECT_EQ(first.from_graphid(), GraphId(1, 0, 0));
+  EXPECT_TRUE(static_cast<bool>(view));
+}
+
+TEST(ComplexRestrictionView, IteratorIncrement) {
+  RestrictionBuilder builder;
+  builder.add_restriction(GraphId(1, 0, 0), GraphId(100, 0, 0), 0x1);
+  builder.add_restriction(GraphId(2, 0, 0), GraphId(100, 0, 0), 0x2);
+  builder.add_restriction(GraphId(3, 0, 0), GraphId(100, 0, 0), 0x4);
+
+  ComplexRestrictionView view(builder.data.data(), builder.data.size(), GraphId(100, 0, 0), 0xFF,
+                              true);
+
+  auto it = view.begin();
+  ASSERT_NE(it, view.end());
+  EXPECT_EQ((*it).from_graphid(), GraphId(1, 0, 0));
+
+  ++it;
+  ASSERT_NE(it, view.end());
+  EXPECT_EQ((*it).from_graphid(), GraphId(2, 0, 0));
+
+  ++it;
+  ASSERT_NE(it, view.end());
+  EXPECT_EQ((*it).from_graphid(), GraphId(3, 0, 0));
+
+  ++it;
+  EXPECT_EQ(it, view.end());
+}
+
+TEST(ComplexRestrictionView, ModeFiltering) {
+  RestrictionBuilder builder;
+  builder.add_restriction(GraphId(1, 0, 0), GraphId(100, 0, 0), 0x1);  // mode 1
+  builder.add_restriction(GraphId(2, 0, 0), GraphId(100, 0, 0), 0x2);  // mode 2
+  builder.add_restriction(GraphId(3, 0, 0), GraphId(100, 0, 0), 0x4);  // mode 4
+  builder.add_restriction(GraphId(4, 0, 0), GraphId(100, 0, 0), 0x8);  // mode 8
+  builder.add_restriction(GraphId(5, 0, 0), GraphId(100, 0, 0), 0x1F); // modes 1,2,4,8,16
+
+  // Query for mode 0x1 (should match restrictions with modes 0x1 and 0x1F)
+  ComplexRestrictionView view1(builder.data.data(), builder.data.size(), GraphId(100, 0, 0), 0x1,
+                               true);
+  int count1 = 0;
+  for (const auto& cr : view1) {
+    (void)cr;
+    count1++;
+  }
+  EXPECT_EQ(count1, 2);
+
+  // Query for mode 0x2 (should match restrictions with modes 0x2 and 0x1F)
+  ComplexRestrictionView view2(builder.data.data(), builder.data.size(), GraphId(100, 0, 0), 0x2,
+                               true);
+  int count2 = 0;
+  for (const auto& cr : view2) {
+    (void)cr;
+    count2++;
+  }
+  EXPECT_EQ(count2, 2);
+
+  // Query for mode 0x3 (should match restrictions with modes 0x1, 0x2, and 0x1F)
+  ComplexRestrictionView view3(builder.data.data(), builder.data.size(), GraphId(100, 0, 0), 0x3,
+                               true);
+  int count3 = 0;
+  for (const auto& cr : view3) {
+    (void)cr;
+    count3++;
+  }
+  EXPECT_EQ(count3, 3);
 }
 
 } // namespace

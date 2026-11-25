@@ -1,10 +1,9 @@
 #ifndef VALHALLA_BALDR_DIRECTEDEDGE_H_
 #define VALHALLA_BALDR_DIRECTEDEDGE_H_
 
-#include <cstdint>
 #include <valhalla/baldr/graphconstants.h>
 #include <valhalla/baldr/graphid.h>
-#include <valhalla/baldr/json.h>
+#include <valhalla/baldr/rapidjson_fwd.h>
 #include <valhalla/baldr/turn.h>
 
 namespace valhalla {
@@ -15,10 +14,7 @@ namespace baldr {
  */
 class DirectedEdge {
 public:
-  /**
-   * Constructor
-   */
-  DirectedEdge();
+  DirectedEdge() = default;
 
   /**
    * Gets the end node of this directed edge.
@@ -171,10 +167,8 @@ public:
   /**
    * Sets the length of the edge in meters.
    * @param  length  Length of the edge in meters.
-   * @param  should_error  Bool indicating whether or not to error or warn on length > kMaxEdgeLength
-   *
    */
-  void set_length(const uint32_t length, bool should_error = true);
+  void set_length(const double length);
 
   /**
    * Get the weighted grade factor
@@ -266,20 +260,6 @@ public:
    * @param  toll  True if this edge is part of a toll road, false if not.
    */
   void set_toll(const bool toll);
-
-  /**
-   * Does this edge have a seasonal access (e.g., closed in the winter)?
-   * @return  Returns true if this edge has seasonal access, false if not.
-   */
-  bool seasonal() const {
-    return seasonal_;
-  }
-
-  /**
-   * Sets the flag indicating this edge has seasonal access.
-   * @param  seasonal  True if this edge has seasonal access, false if not.
-   */
-  void set_seasonal(const bool seasonal);
 
   /**
    * Is this edge part of a private or no through road that allows access
@@ -743,12 +723,26 @@ public:
   }
 
   /**
+   * Return the name consistency mask (8 bits)
+   * @return  Returns the name consistency mask.
+   */
+  uint8_t name_consistency() const {
+    return name_consistency_;
+  }
+
+  /**
    * Set the name consistency given the other edge's local index. This is limited
    * to the first 8 local edge indexes.
    * @param  from  Local index of the from edge.
    * @param  c     Are names consistent between the 2 edges?
    */
   void set_name_consistency(const uint32_t from, const bool c);
+
+  /**
+   * Set the name consistency mask.
+   * @param  mask  Name consistency mask (8 bits).
+   */
+  void set_name_consistency(const uint8_t mask);
 
   /**
    * Is this edge unpaved or bad surface?
@@ -1086,6 +1080,15 @@ public:
   }
 
   /**
+   * We hijack the shortcut mask to move   ferry edges to lower
+   * hierarchies. Will be set during the graph build and re-set during the
+   * hierarchy builder.
+   * @param rc    the road class which should determine the edge's hierarchy
+   * @param reset whether is_shortcut_ should be set false
+   */
+  void set_hierarchy_roadclass(const baldr::RoadClass rc, const bool reset = false);
+
+  /**
    * Set the mask for whether this edge represents a shortcut between 2 nodes.
    * Shortcuts bypass nodes that only connect to lower levels in the hierarchy
    * (other than the 1-2 higher level edges that superseded by the shortcut).
@@ -1193,82 +1196,82 @@ public:
 
   /**
    * Create a json object representing this edge
-   * @return  Returns the json object
+   *  @param writer The writer json object to represent the object
    */
-  json::MapPtr json() const;
+  void json(rapidjson::writer_wrapper_t& writer) const;
 
 protected:
   // 1st 8-byte word
-  uint64_t endnode_ : 46;      // End node of the directed edge
-  uint64_t restrictions_ : 8;  // Restrictions - mask of local edge indexes at the end node
-  uint64_t opp_index_ : 7;     // Opposing directed edge index
-  uint64_t forward_ : 1;       // Is the edge info forward or reverse
-  uint64_t leaves_tile_ : 1;   // Does directed edge end in a different tile?
-  uint64_t ctry_crossing_ : 1; // Does the edge cross into new country
+  uint64_t endnode_ : 46 = 0;      // End node of the directed edge
+  uint64_t restrictions_ : 8 = 0;  // Restrictions - mask of local edge indexes at the end node
+  uint64_t opp_index_ : 7 = 0;     // Opposing directed edge index
+  uint64_t forward_ : 1 = 0;       // Is the edge info forward or reverse
+  uint64_t leaves_tile_ : 1 = 0;   // Does directed edge end in a different tile?
+  uint64_t ctry_crossing_ : 1 = 0; // Does the edge cross into new country
 
   // 2nd 8 byte word
-  uint64_t edgeinfo_offset_ : 25;    // Offset to edge data
-  uint64_t access_restriction_ : 12; // General restriction or access condition (per mode)
-  uint64_t start_restriction_ : 12;  // Complex restriction (per mode) starts on this directed edge
-  uint64_t end_restriction_ : 12;    // Complex restriction (per mode) ends on this directed edge
-  uint64_t complex_restriction_ : 1; // Edge is part of a complex restriction
-  uint64_t dest_only_ : 1;           // Access allowed to destination only (e.g., private)
-  uint64_t not_thru_ : 1;            // Edge leads to "no-through" region
+  uint64_t edgeinfo_offset_ : 25 = 0;    // Offset to edge data
+  uint64_t access_restriction_ : 12 = 0; // General restriction or access condition (per mode)
+  uint64_t start_restriction_ : 12 = 0; // Complex restriction (per mode) starts on this directed edge
+  uint64_t end_restriction_ : 12 = 0;   // Complex restriction (per mode) ends on this directed edge
+  uint64_t complex_restriction_ : 1 = 0; // Edge is part of a complex restriction
+  uint64_t dest_only_ : 1 = 0;           // Access allowed to destination only (e.g., private)
+  uint64_t not_thru_ : 1 = 0;            // Edge leads to "no-through" region
 
   // 3rd 8-byte word. Note: speed values above 250 for special cases (closures, construction)
-  uint64_t speed_ : 8;                  // Speed (kph)
-  uint64_t free_flow_speed_ : 8;        // Speed when there is no traffic(kph)
-  uint64_t constrained_flow_speed_ : 8; // Speed when there is traffic(kph)
-  uint64_t truck_speed_ : 8;            // Truck speed (kph)
-  uint64_t name_consistency_ : 8;       // Name consistency at start node with other local edges
-  uint64_t use_ : 6;                    // Specific use types
-  uint64_t lanecount_ : 4;              // Number of lanes
-  uint64_t density_ : 4;                // Relative road density along the edge
-  uint64_t classification_ : 3;         // Classification/importance of the road/path
-  uint64_t surface_ : 3;                // Representation of smoothness
-  uint64_t toll_ : 1;                   // Edge is part of a toll road
-  uint64_t roundabout_ : 1;             // Edge is part of a roundabout
-  uint64_t truck_route_ : 1;            // Edge that is part of a truck route/network
-  uint64_t has_predicted_speed_ : 1;    // Does this edge have a predicted speed records?
+  uint64_t speed_ : 8 = 0;                  // Speed (kph)
+  uint64_t free_flow_speed_ : 8 = 0;        // Speed when there is no traffic(kph)
+  uint64_t constrained_flow_speed_ : 8 = 0; // Speed when there is traffic(kph)
+  uint64_t truck_speed_ : 8 = 0;            // Truck speed (kph)
+  uint64_t name_consistency_ : 8 = 0;       // Name consistency at start node with other local edges
+  uint64_t use_ : 6 = 0;                    // Specific use types
+  uint64_t lanecount_ : 4 = 0;              // Number of lanes
+  uint64_t density_ : 4 = 0;                // Relative road density along the edge
+  uint64_t classification_ : 3 = 0;         // Classification/importance of the road/path
+  uint64_t surface_ : 3 = 0;                // Representation of smoothness
+  uint64_t toll_ : 1 = 0;                   // Edge is part of a toll road
+  uint64_t roundabout_ : 1 = 0;             // Edge is part of a roundabout
+  uint64_t truck_route_ : 1 = 0;            // Edge that is part of a truck route/network
+  uint64_t has_predicted_speed_ : 1 = 0;    // Does this edge have a predicted speed records?
 
   // 4th 8-byte word
-  uint64_t forwardaccess_ : 12; // Access (bit mask) in forward direction (see graphconstants.h)
-  uint64_t reverseaccess_ : 12; // Access (bit mask) in reverse direction (see graphconstants.h)
-  uint64_t max_up_slope_ : 5;   // Maximum upward slope
-  uint64_t max_down_slope_ : 5; // Maximum downward slope
-  uint64_t sac_scale_ : 3;      // Is this edge for hiking and if so how difficult is the hike?
-  uint64_t cycle_lane_ : 2;     // Does this edge have bicycle lanes?
-  uint64_t bike_network_ : 1;   // Edge that is part of a bicycle network
-  uint64_t use_sidepath_ : 1;   // Is there a cycling path to the side that should be preferred?
-  uint64_t dismount_ : 1;       // Do you need to dismount when biking on this edge?
-  uint64_t sidewalk_left_ : 1;  // Sidewalk to the left of the edge
-  uint64_t sidewalk_right_ : 1; // Sidewalk to the right of the edge
-  uint64_t shoulder_ : 1;       // Does the edge have a shoulder?
-  uint64_t lane_conn_ : 1;      // 1 if has lane connectivity, 0 otherwise
-  uint64_t turnlanes_ : 1;      // Does this edge have turn lanes (end of edge)
-  uint64_t sign_ : 1;           // Exit signs exist for this edge
-  uint64_t internal_ : 1;       // Edge that is internal to an intersection
-  uint64_t tunnel_ : 1;         // Is this edge part of a tunnel
-  uint64_t bridge_ : 1;         // Is this edge part of a bridge?
-  uint64_t traffic_signal_ : 1; // Traffic signal at end of the directed edge
-  uint64_t seasonal_ : 1;       // Seasonal access (ex. no access in winter)
-  uint64_t deadend_ : 1;        // Leads to a dead-end (no other drivable roads) TODO
-  uint64_t bss_connection_ : 1; // Does this lead to(come out from) a bike share station?
-  uint64_t stop_sign_ : 1;      // Stop sign at end of the directed edge
-  uint64_t yield_sign_ : 1;     // Yield/give way sign at end of the directed edge
-  uint64_t hov_type_ : 1;       // if (is_hov_only()==true), this means (HOV2=0, HOV3=1)
-  uint64_t indoor_ : 1;         // Is this edge indoor
-  uint64_t lit_ : 1;            // Is the edge lit?
-  uint64_t dest_only_hgv_ : 1;  // destonly for HGV specifically
-  uint64_t spare4_ : 3;
+  uint64_t forwardaccess_ : 12 = 0; // Access (bit mask) in forward direction (see graphconstants.h)
+  uint64_t reverseaccess_ : 12 = 0; // Access (bit mask) in reverse direction (see graphconstants.h)
+  uint64_t max_up_slope_ : 5 = 0;   // Maximum upward slope
+  uint64_t max_down_slope_ : 5 = 0; // Maximum downward slope
+  uint64_t sac_scale_ : 3 = 0;      // Is this edge for hiking and if so how difficult is the hike?
+  uint64_t cycle_lane_ : 2 = 0;     // Does this edge have bicycle lanes?
+  uint64_t bike_network_ : 1 = 0;   // Edge that is part of a bicycle network
+  uint64_t use_sidepath_ : 1 = 0;   // Is there a cycling path to the side that should be preferred?
+  uint64_t dismount_ : 1 = 0;       // Do you need to dismount when biking on this edge?
+  uint64_t sidewalk_left_ : 1 = 0;  // Sidewalk to the left of the edge
+  uint64_t sidewalk_right_ : 1 = 0; // Sidewalk to the right of the edge
+  uint64_t shoulder_ : 1 = 0;       // Does the edge have a shoulder?
+  uint64_t lane_conn_ : 1 = 0;      // 1 if has lane connectivity, 0 otherwise
+  uint64_t turnlanes_ : 1 = 0;      // Does this edge have turn lanes (end of edge)
+  uint64_t sign_ : 1 = 0;           // Exit signs exist for this edge
+  uint64_t internal_ : 1 = 0;       // Edge that is internal to an intersection
+  uint64_t tunnel_ : 1 = 0;         // Is this edge part of a tunnel
+  uint64_t bridge_ : 1 = 0;         // Is this edge part of a bridge?
+  uint64_t traffic_signal_ : 1 = 0; // Traffic signal at end of the directed edge
+  uint64_t spare1_ : 1 = 0;         // Used to be "seasonal", was never used, can be reclaimed
+  uint64_t deadend_ : 1 = 0;        // Leads to a dead-end (no other drivable roads) TODO
+  uint64_t bss_connection_ : 1 = 0; // Does this lead to(come out from) a bike share station?
+  uint64_t stop_sign_ : 1 = 0;      // Stop sign at end of the directed edge
+  uint64_t yield_sign_ : 1 = 0;     // Yield/give way sign at end of the directed edge
+  uint64_t hov_type_ : 1 = 0;       // if (is_hov_only()==true), this means (HOV2=0, HOV3=1)
+  uint64_t indoor_ : 1 = 0;         // Is this edge indoor
+  uint64_t lit_ : 1 = 0;            // Is the edge lit?
+  uint64_t dest_only_hgv_ : 1 = 0;  // destonly for HGV specifically
+  uint64_t spare4_ : 3 = 0;
 
   // 5th 8-byte word
-  uint64_t turntype_ : 24;      // Turn type (see graphconstants.h)
-  uint64_t edge_to_left_ : 8;   // Is there an edge to the left (between
-                                // the "from edge" and this edge)
-  uint64_t length_ : 24;        // Length in meters
-  uint64_t weighted_grade_ : 4; // Weighted estimate of grade
-  uint64_t curvature_ : 4;      // Curvature factor
+  uint64_t turntype_ : 24 = 0;      // Turn type (see graphconstants.h)
+  uint64_t edge_to_left_ : 8 = 0;   // Is there an edge to the left (between
+                                    // the "from edge" and this edge)
+  uint64_t length_ : 24 = 0;        // Length in meters
+  uint64_t weighted_grade_ : 4 = 6; // Weighted estimate of grade
+  uint64_t curvature_ : 4 = 0;      // Curvature factor
 
   // Stop impact among edges
   struct StopImpact {
@@ -1289,14 +1292,14 @@ protected:
   StopOrLine stopimpact_;
 
   // Local edge index, opposing local index, shortcut info
-  uint32_t localedgeidx_ : 7;  // Index of the edge on the local level
-  uint32_t opp_local_idx_ : 7; // Opposing local edge index (for costing and Uturn detection)
-  uint32_t shortcut_ : 7;      // Shortcut edge (mask)
-  uint32_t superseded_ : 7;    // Edge is superseded by a shortcut (mask)
-  uint32_t is_shortcut_ : 1;   // True if this edge is a shortcut
-  uint32_t speed_type_ : 1;    // Speed type (used in setting default speeds)
-  uint32_t named_ : 1;         // 1 if this edge has names, 0 if unnamed
-  uint32_t link_ : 1;          // *link tag - Ramp or turn channel. Used in costing.
+  uint32_t localedgeidx_ : 7 = 0;  // Index of the edge on the local level
+  uint32_t opp_local_idx_ : 7 = 0; // Opposing local edge index (for costing and Uturn detection)
+  uint32_t shortcut_ : 7 = 0;      // Shortcut edge (mask)
+  uint32_t superseded_ : 7 = 0;    // Edge is superseded by a shortcut (mask)
+  uint32_t is_shortcut_ : 1 = 0;   // True if this edge is a shortcut
+  uint32_t speed_type_ : 1 = 0;    // Speed type (used in setting default speeds)
+  uint32_t named_ : 1 = 0;         // 1 if this edge has names, 0 if unnamed
+  uint32_t link_ : 1 = 0;          // *link tag - Ramp or turn channel. Used in costing.
 };
 
 /**
@@ -1307,7 +1310,7 @@ protected:
 class DirectedEdgeExt {
 
 protected:
-  uint64_t spare0_ : 64;
+  uint64_t spare0_ : 64 = 0;
 };
 
 } // namespace baldr

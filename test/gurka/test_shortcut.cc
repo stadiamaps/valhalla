@@ -1,12 +1,13 @@
-#include "gurka.h"
-#include <gtest/gtest.h>
-
 #include "baldr/graphconstants.h"
 #include "baldr/graphreader.h"
+#include "gurka.h"
 #include "midgard/pointll.h"
-#include "mjolnir/graphtilebuilder.h"
+#include "test.h"
+
+#include <gtest/gtest.h>
 
 using namespace valhalla;
+using namespace valhalla::baldr;
 
 // Here 2 shortcuts should be created: from A to C all edges have speed 80 and from C to A all have
 // speed 90
@@ -64,39 +65,7 @@ TEST(Shortcuts, LoopWithoutShortcut) {
   auto loopEdge = std::get<0>(gurka::findEdgeByNodes(graph_reader, layout, "A", "B"));
   auto shortcut = graph_reader.GetShortcut(loopEdge);
 
-  EXPECT_FALSE(shortcut.Is_Valid()) << "Shortcuts found. Check the map.";
-}
-
-// Here no shortcuts are created. There could be one from A to C with speed 80 but in the opposite
-// direction speeds differ which blocks CA creation.
-TEST(Shortcuts, CreateInvalid) {
-  constexpr double gridsize = 50;
-
-  const std::string ascii_map = R"(
-      A--B--C
-  )";
-
-  const gurka::ways ways = {
-      {"AB",
-       {{"highway", "primary"},
-        {"name", "Independence Avenue"},
-        {"maxspeed:forward", "80"},
-        {"maxspeed:backward", "80"}}},
-      {"BC",
-       {{"highway", "primary"},
-        {"name", "Independence Avenue"},
-        {"maxspeed:forward", "80"},
-        {"maxspeed:backward", "90"}}},
-  };
-
-  const auto layout = gurka::detail::map_to_coordinates(ascii_map, gridsize);
-  auto map = gurka::buildtiles(layout, ways, {}, {}, "test/data/gurka_openlrjoiner_shortcut_speed");
-
-  baldr::GraphReader graph_reader(map.config.get_child("mjolnir"));
-
-  // check that there are no shortcut edges
-  EXPECT_ANY_THROW(gurka::findEdgeByNodes(graph_reader, layout, "A", "C"));
-  EXPECT_ANY_THROW(gurka::findEdgeByNodes(graph_reader, layout, "C", "A"));
+  EXPECT_FALSE(shortcut.is_valid()) << "Shortcuts found. Check the map.";
 }
 
 TEST(Shortcuts, ShortcutSpeed) {
@@ -163,6 +132,7 @@ TEST(Shortcuts, ShortcutSpeed) {
       shortcut_infos.push_back(std::make_tuple(shortcutid, edge->speed(), edge->truck_speed()));
       // For current test case the values should be different
       EXPECT_NE(edge->speed(), edge->truck_speed());
+      EXPECT_EQ(tile->edgeinfo(edge).mean_elevation(), kNoElevationData); // no elevation sentinel
     }
   }
 
@@ -190,8 +160,7 @@ TEST(Shortcuts, ShortcutSpeed) {
 }
 
 TEST(Shortcuts, TruckSpeedNotSet) {
-  // When truck speed is not set normal speed is used to calculate shortcut truck speed, which
-  // is clamped at 90 KPH.
+  // When truck speed is not set normal speed is used to calculate shortcut truck speed
   // As a result it should be equal to normal shortcut speed.
   const std::string ascii_map = R"(A-----B\
                                            \C
@@ -231,8 +200,8 @@ TEST(Shortcuts, TruckSpeedNotSet) {
       if (!edge->is_shortcut() || !(edge->forwardaccess() & baldr::kAutoAccess))
         continue;
 
-      // truck speed should be smaller than the edge speed
-      EXPECT_GT(edge->speed(), edge->truck_speed());
+      // truck speed should be equal to edge speed by default
+      EXPECT_EQ(edge->speed(), edge->truck_speed());
       found_shortcut = true;
     }
   }
@@ -248,12 +217,12 @@ TEST(Shortcuts, TruckSpeedPartiallySet) {
       {"AB",
        {{"highway", "motorway"},
         {"maxspeed", "100"},
-        {"maxspeed:hgv", "100"},
+        {"maxspeed:hgv", "90"},
         {"name", "High street"}}},
       {"BC",
        {{"highway", "motorway"},
         {"maxspeed", "100"},
-        {"maxspeed:hgv", "100"},
+        {"maxspeed:hgv", "90"},
         {"name", "High street"}}},
       {"CD", {{"highway", "motorway"}, {"maxspeed", "100"}, {"name", "High street"}}},
       {"DE", {{"highway", "motorway"}, {"maxspeed", "100"}, {"name", "High street"}}},
@@ -276,8 +245,10 @@ TEST(Shortcuts, TruckSpeedPartiallySet) {
       if (!edge->is_shortcut() || !(edge->forwardaccess() & baldr::kAutoAccess))
         continue;
 
-      EXPECT_GT(100, edge->truck_speed());
-      EXPECT_LT(90, edge->truck_speed());
+      // 4 equal-length edges, 2 have 100kmh and 2 have 90kmh for trucks which gives 95 as a result
+      EXPECT_EQ(95, edge->truck_speed());
+      // but as all 4 have the same 100kmh regular speed, shortcut also has 100kmh
+      EXPECT_EQ(100, edge->speed());
       found_shortcut = true;
     }
   }
@@ -363,60 +334,96 @@ TEST(Shortcuts, ShortcutsInBins) {
 }
 
 TEST(Shortcuts, ShortcutRestrictions) {
+  using node_pairs = std::vector<std::pair<std::string, std::string>>;
+
+  // the first line should produce only one HUGE shortcut, the second line one small one
   const std::string ascii_map = R"(
   A--B--C--D--E--F
 
   G--H--I--J--K--L
   )";
 
-  // the first line should produce only one shortcut, the second two
-  gurka::ways ways = {
-      {"AB", {{"highway", "motorway"}, {"name", "highway"}}},
-      {"BC", {{"highway", "motorway"}, {"name", "highway"}}},
-      {"CD", {{"highway", "motorway"}, {"name", "highway"}, {"maxweight", "3.5"}}},
-      {"DE", {{"highway", "motorway"}, {"name", "highway"}, {"maxweight", "8"}}},
-      {"EF", {{"highway", "motorway"}, {"name", "highway"}}},
+  std::map<std::string, std::string> high_access_res = {{"highway", "motorway"}, {"hazmat", "yes"},
+                                                        {"maxweight", "30"},     {"maxheight", "6"},
+                                                        {"maxlength", "10"},     {"maxaxles", "10"}};
+  std::map<std::string, std::string> low_access_res = {{"highway", "motorway"}, {"hazmat", "no"},
+                                                       {"maxweight", "3"},      {"maxheight", "3"},
+                                                       {"maxlength", "4"},      {"maxaxles", "4"}};
 
-      {"GH", {{"highway", "motorway"}, {"name", "highway"}}},
-      {"HI", {{"highway", "motorway"}, {"name", "highway"}, {"hazmat", "yes"}}},
-      {"IJ", {{"highway", "motorway"}, {"name", "highway"}, {"hazmat", "yes"}}},
-      {"JK", {{"highway", "motorway"}, {"name", "highway"}}},
-      {"KL", {{"highway", "motorway"}, {"name", "highway"}}},
+  gurka::ways ways = {
+      {"AB", {{"highway", "motorway"}}},
+      {"BC", {{"highway", "motorway"}}},
+      {"CD", high_access_res},
+      {"DE", low_access_res},
+      {"EF", {{"highway", "motorway"}}},
+
+      {"GH", {{"highway", "motorway"}}},
+      {"HI", {{"highway", "motorway"}, {"motorcar:conditional", "yes @ 00:00-07:00"}}},
+      {"IJ", {{"highway", "motorway"}, {"motorcar:conditional", "no @ 00:00-07:00"}}},
+      {"JK", {{"highway", "motorway"}}},
+      {"KL", {{"highway", "motorway"}}},
   };
   const auto layout = gurka::detail::map_to_coordinates(ascii_map, 500);
   auto map = gurka::buildtiles(layout, ways, {}, {},
                                VALHALLA_BUILD_DIR "test/data/gurka_shortcut_restrictions");
   baldr::GraphReader reader(map.config.get_child("mjolnir"));
 
-  // test we got the right shortcuts edges, implicitly means they were broken properly
-  for (const auto& end_node : {"C", "J", "L"}) {
-    const auto shortcut =
-        gurka::findEdge(reader, layout, "highway", end_node, baldr::GraphId{}, 0, true);
+  // test we got the right shortcuts edges for the second line of the map
+  // implicitly means they were broken properly
+  for (const auto& pair : node_pairs{{"A", "F"}, {"F", "A"}, {"J", "L"}, {"L", "J"}}) {
+    const auto shortcut = gurka::findEdgeByNodes(reader, layout, pair.first, pair.second);
     EXPECT_TRUE(std::get<1>(shortcut)->is_shortcut());
-    EXPECT_TRUE(std::get<3>(shortcut)->is_shortcut());
-    EXPECT_NEAR(std::get<1>(shortcut)->length(), 3000, 1);
-    EXPECT_NEAR(std::get<3>(shortcut)->length(), 3000, 1);
+  }
+
+  // test that the long shortcut has the strictest non-conditional access restrictions
+  const auto AF = gurka::findEdgeByNodes(reader, layout, "A", "F");
+  auto AF_res_view =
+      reader.GetGraphTile(std::get<0>(AF))->GetAccessRestrictions(std::get<0>(AF).id(), kAllAccess);
+  std::vector<baldr::AccessRestriction> AF_res(AF_res_view.begin(), AF_res_view.end());
+  EXPECT_EQ(AF_res.size(), 5);
+  for (const auto& res : AF_res) {
+    uint64_t expected_value = 0;
+    switch (res.type()) {
+      case AccessType::kHazmat:
+        // should be false/0
+        break;
+      case AccessType::kMaxWeight:
+        expected_value = strtoull(low_access_res["maxweight"].c_str(), nullptr, 10) * 100;
+        break;
+      case AccessType::kMaxHeight:
+        expected_value = strtoull(low_access_res["maxheight"].c_str(), nullptr, 10) * 100;
+        break;
+      case AccessType::kMaxLength:
+        expected_value = strtoull(low_access_res["maxlength"].c_str(), nullptr, 10) * 100;
+        break;
+      case AccessType::kMaxAxles:
+        expected_value = strtoull(low_access_res["maxaxles"].c_str(), nullptr, 10);
+        break;
+      default:
+        break;
+    }
+    EXPECT_EQ(res.value(), expected_value);
   }
 
   // test the right edges are really superseded by a shortcut
   // forward
-  for (const auto& end_node : {"B", "I", "K"}) {
-    const auto edge = gurka::findEdge(reader, layout, "highway", end_node);
+  for (const auto& pair : node_pairs{{"A", "B"}, {"J", "K"}}) {
+    const auto edge = gurka::findEdgeByNodes(reader, layout, pair.first, pair.second);
     EXPECT_NE(std::get<1>(edge)->superseded(), 0);
   }
   // reverse
-  for (const auto& end_node : {"C", "J", "L"}) {
-    const auto edge = gurka::findEdge(reader, layout, "highway", end_node);
-    EXPECT_NE(std::get<3>(edge)->superseded(), 0);
+  for (const auto& pair : node_pairs{{"F", "E"}, {"L", "K"}}) {
+    const auto edge = gurka::findEdgeByNodes(reader, layout, pair.first, pair.second);
+    EXPECT_NE(std::get<1>(edge)->superseded(), 0);
   }
 
   // test that without those restrictions we're still building all shortcuts
 
   // remove those access restrictions
-  ways["CD"].erase("maxweight");
-  ways["DE"].erase("maxweight");
-  ways["HI"].erase("hazmat");
-  ways["IJ"].erase("hazmat");
+  ways["CD"] = {{"highway", "motorway"}};
+  ways["DE"] = {{"highway", "motorway"}};
+  ways["HI"] = {{"highway", "motorway"}};
+  ways["IJ"] = {{"highway", "motorway"}};
   auto map2 = gurka::buildtiles(layout, ways, {}, {},
                                 VALHALLA_BUILD_DIR "test/data/gurka_shortcut_without_restrictions");
   baldr::GraphReader reader2(map2.config.get_child("mjolnir"));
@@ -430,12 +437,67 @@ TEST(Shortcuts, ShortcutRestrictions) {
   }
 
   // we did build the long shorcuts across all edges
-  for (const auto& end_node : {"F", "L"}) {
-    const auto shortcut =
-        gurka::findEdge(reader2, layout, "highway", end_node, baldr::GraphId{}, 0, true);
+  for (const auto& pair : node_pairs{{"A", "F"}, {"F", "A"}, {"G", "L"}, {"L", "G"}}) {
+    const auto shortcut = gurka::findEdgeByNodes(reader2, layout, pair.first, pair.second);
     EXPECT_TRUE(std::get<1>(shortcut)->is_shortcut());
-    EXPECT_TRUE(std::get<3>(shortcut)->is_shortcut());
     EXPECT_NEAR(std::get<1>(shortcut)->length(), 7500, 1);
-    EXPECT_NEAR(std::get<3>(shortcut)->length(), 7500, 1);
   }
+}
+
+TEST(Shortcuts, Duplicate) {
+  constexpr double gridsize = 50;
+
+  const std::string ascii_map = R"(
+                D
+                |
+      L         |                    M
+      |     ----C-------I----        |
+      |    /    |       |    \       |
+      A---B     |       |     G------H
+      |    \    |       |    /       |
+      |     ----J-------E----        |
+      K                 |            N
+                        |
+                        F
+  )";
+
+  const gurka::ways ways = {
+      {"ABCIGH", {{"highway", "tertiary"}, {"name", "Fabrieksgracht"}}},
+      {"BJEG", {{"highway", "tertiary"}, {"name", "Fabrieksgracht"}}},
+      {"DCJ", {{"highway", "residential"}, {"name", "Molenplantsoen"}}},
+      {"FEI", {{"highway", "residential"}, {"name", "Jan in 't Veltstraat "}}},
+      {"LAK", {{"highway", "primary"}, {"name", "Querstraße"}}},
+      {"MHN", {{"highway", "primary"}, {"name", "Querstraße"}}},
+
+  };
+
+  const auto layout = gurka::detail::map_to_coordinates(ascii_map, gridsize);
+  auto map =
+      gurka::buildtiles(layout, ways, {}, {}, VALHALLA_BUILD_DIR "test/data/duplicate_shortcuts");
+
+  baldr::GraphReader reader(map.config.get_child("mjolnir"));
+
+  auto b = gurka::findNode(reader, layout, "B");
+  auto b_ni = reader.nodeinfo(b);
+
+  size_t found_shortcuts = 0;
+
+  auto edge_id = b;
+  edge_id.set_id(b_ni->edge_index());
+  auto* de = reader.directededge(edge_id);
+  std::vector<std::vector<midgard::PointLL>> shapes;
+  for (size_t i = 0; i < b_ni->edge_count(); ++i, ++de, edge_id++) {
+    found_shortcuts += de->is_shortcut();
+    if (de->is_shortcut()) {
+      shapes.push_back(reader.edgeinfo(edge_id).shape());
+    }
+  }
+  EXPECT_EQ(found_shortcuts, 2);
+
+  ASSERT_EQ(shapes.size(), 2);
+  EXPECT_EQ(shapes[0].size(), shapes[1].size());
+  ASSERT_EQ(shapes[0][0], shapes[1][0]);
+  EXPECT_FALSE(test::shape_equality(shapes[0], shapes[1]))
+      << "Expected shapes to differ: " << midgard::encode(shapes[0]) << " vs "
+      << midgard::encode(shapes[1]);
 }

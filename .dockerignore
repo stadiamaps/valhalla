@@ -3,7 +3,6 @@
 *~
 
 # built objects
-valhalla_run_map_match
 valhalla_meili_worker
 valhalla_benchmark_admins
 valhalla_build_admins
@@ -13,18 +12,11 @@ valhalla_query_transit
 valhalla_ways_to_edges
 valhalla_build_speeds
 valhalla_build_statistics
-valhalla_benchmark_adjacency_list
-valhalla_benchmark_loki
-valhalla_benchmark_skadi
 valhalla_export_edges
 valhalla_loki_worker
 valhalla_odin_worker
 valhalla_service
 valhalla_validate_transit
-valhalla_run_matrix
-valhalla_run_isochrone
-valhalla_run_route
-valhalla_path_comparison
 valhalla_skadi_worker
 valhalla_thor_worker
 valhalla_tyr_worker
@@ -44,10 +36,7 @@ libvalhalla.la
 date_time_zonespec.csv
 mason/
 mason_packages/
-
-# scripts
-scripts/gdal-2.0.0/
-scripts/gdal-2.0.0.tar.gz
+.DS_Store
 
 # tools
 .cproject
@@ -60,9 +49,22 @@ CMakeLists.txt.user
 .idea
 /.tidytmp
 vcpkg*/
+overlay-ports-vcpkg/
+vcpkg-configuration.json
+run_route_scripts/
+test_requests/
 
-# documentation
-site/
-
-.DS_Store
+# docker
 Dockerfile
+
+# CI
+.github/
+.circleci/
+.pre-commit-config.yaml
+
+# docs etc
+site/
+docs/
+CONTRIBUTING.md
+NEWS 
+taginfo.json

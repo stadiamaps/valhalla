@@ -1,6 +1,8 @@
 #include "sif/recost.h"
 #include "baldr/time_info.h"
 
+#include <cmath>
+
 namespace valhalla {
 namespace sif {
 
@@ -35,12 +37,12 @@ void recost_forward(baldr::GraphReader& reader,
 
   // grab the first path edge
   baldr::GraphId edge_id = edge_cb();
-  if (!edge_id.Is_Valid()) {
+  if (!edge_id.is_valid()) {
     return;
   }
 
   // fetch the graph objects
-  graph_tile_ptr tile;
+  baldr::graph_tile_ptr tile;
   const baldr::DirectedEdge* edge = reader.directededge(edge_id, tile);
 
   // first edge is bogus
@@ -49,7 +51,7 @@ void recost_forward(baldr::GraphReader& reader,
   }
 
   // fail if the first edge is filtered
-  if (!ignore_access && costing.Allowed(edge, tile) == 0.f) {
+  if (!ignore_access && costing.Allowed(edge, tile, edge_id) == 0.f) {
     throw std::runtime_error("This path requires different edge access than this costing allows");
   }
 
@@ -62,7 +64,7 @@ void recost_forward(baldr::GraphReader& reader,
   Cost cost{};
   double length = 0;
 
-  while (edge_id.Is_Valid()) {
+  while (edge_id.is_valid()) {
     // get the previous edges node
     node = edge ? reader.nodeinfo(edge->endnode(), tile) : nullptr;
     if (edge && !node) {
@@ -92,36 +94,45 @@ void recost_forward(baldr::GraphReader& reader,
     // so that we can find if we reach the end of the restriction. then we need to replay the
     // queued edges as normal
     uint8_t time_restrictions_TODO = baldr::kInvalidRestriction;
+    uint8_t destonly_restriction_mask = 0;
+    bool edge_destonly = false;
     // if its not time dependent set to 0 for Allowed method below
-    const uint64_t localtime = offset_time.valid ? offset_time.local_time : 0;
+    const uint64_t current_unix_time = offset_time.valid ? offset_time.unix_time : 0;
     // we should call 'Allowed' method even if 'ignore_access' flag is true in order to
     // evaluate time restrictions
     const auto next_id = edge_cb();
     if (predecessor != baldr::kInvalidLabel &&
-        (!costing.Allowed(edge, !next_id.Is_Valid(), label, tile, edge_id, localtime,
-                          offset_time.timezone_index, time_restrictions_TODO) &&
+        (!costing.Allowed(edge, label, tile, edge_id, current_unix_time, offset_time.timezone_index,
+                          time_restrictions_TODO, destonly_restriction_mask, &edge_destonly) &&
          !ignore_access)) {
       throw std::runtime_error("This path requires different edge access than this costing allows");
     }
 
     // how much of the edge will we use, trim if its the first or last edge
     float edge_pct = 1.f;
+    float start = 0.f;
+    float end = 1.f;
     if (source_pct != -1) {
       edge_pct -= source_pct;
+      start = source_pct;
       source_pct = -1;
     }
 
-    if (!next_id.Is_Valid()) {
+    if (!next_id.is_valid()) {
       edge_pct -= 1.f - target_pct;
       // just to keep compatibility with the logic that handled trivial path in bidiastar
       edge_pct = std::max(0.f, edge_pct);
+      end = target_pct;
     }
 
     // the cost for traversing this intersection
-    Cost transition_cost = node ? costing.TransitionCost(edge, node, label) : Cost{};
+    auto reader_getter = [&reader]() { return baldr::LimitedGraphReader(reader); };
+    Cost transition_cost =
+        node ? costing.TransitionCost(edge, node, label, tile, reader_getter, edge_destonly) : Cost{};
     // update the cost to the end of this edge
     uint8_t flow_sources;
-    cost += transition_cost + costing.EdgeCost(edge, tile, offset_time, flow_sources) * edge_pct;
+    cost += transition_cost + costing.PartialEdgeCost(edge, baldr::GraphId(baldr::kInvalidGraphId),
+                                                      tile, offset_time, flow_sources, start, end);
     // update the length to the end of this edge
     length += edge->length() * edge_pct;
     // construct the label
@@ -129,8 +140,9 @@ void recost_forward(baldr::GraphReader& reader,
     InternalTurn turn =
         node ? costing.TurnType(label.opp_local_idx(), node, edge) : InternalTurn::kNoTurn;
     label = PathEdgeLabel(predecessor++, edge_id, edge, cost, cost.cost, costing.travel_mode(),
-                          length, transition_cost, time_restrictions_TODO, !ignore_access,
-                          static_cast<bool>(flow_sources & baldr::kDefaultFlowMask), turn);
+                          std::round(length), transition_cost, time_restrictions_TODO, !ignore_access,
+                          static_cast<bool>(flow_sources & baldr::kDefaultFlowMask), turn, 0,
+                          edge_destonly);
     // hand back the label
     label_cb(label);
     // next edge

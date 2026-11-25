@@ -1,7 +1,10 @@
 #include "gurka.h"
 #include "test.h"
-#include <boost/format.hpp>
+
 #include <gtest/gtest.h>
+
+#include <format>
+#include <string_view>
 
 #if !defined(VALHALLA_SOURCE_DIR)
 #define VALHALLA_SOURCE_DIR
@@ -104,7 +107,7 @@ TEST(HOVTest, mistagged_hov) {
     auto edge_tuple = gurka::findEdgeByNodes(*reader, layout, "A", "B");
     const baldr::DirectedEdge* edge = std::get<1>(edge_tuple);
     ASSERT_EQ(edge->is_hov_only(), false);
-    ASSERT_TRUE(edge->forwardaccess() & kAutoAccess);
+    ASSERT_TRUE(edge->forwardaccess() & baldr::kAutoAccess);
   }
 }
 
@@ -165,27 +168,27 @@ const std::string include_hov2_true = R"("include_hov2": true)";
 const std::string include_hov3_true = R"("include_hov3": true)";
 const std::string include_hot_true = R"("include_hot": true)";
 
-const std::string req_hov = R"({
+constexpr std::string_view req_hov = R"({{
   "locations": [
-    {"lat": %s, "lon": %s},
-    {"lat": %s, "lon": %s}
+    {{"lat": {:.6f}, "lon": {:.6f}}},
+    {{"lat": {:.6f}, "lon": {:.6f}}}
   ],
   "costing": "auto",
-  "costing_options": {
-    "auto": {
-      %s
-    }
-  },
-  "date_time": { "type": 3, "value": "current" },
+  "costing_options": {{
+    "auto": {{
+      {}
+    }}
+  }},
+  "date_time": {{ "type": 3, "value": "current" }},
   "format": "osrm",
   "shape_format": "geojson",
-  "filters": {
+  "filters": {{
     "attributes": [
       "shape_attributes.closure"
     ],
     "action": "include"
-  }
-}
+  }}
+}}
 )";
 
 //=======================================================================================
@@ -221,11 +224,8 @@ gurka::map HOV2Test::map = {};
 
 //------------------------------------------------------------------
 TEST_F(HOV2Test, default_avoids_hov2) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % "")
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), "");
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "RT 36");
@@ -233,11 +233,8 @@ TEST_F(HOV2Test, default_avoids_hov2) {
 
 //------------------------------------------------------------------
 TEST_F(HOV2Test, hov2_true_uses_hov2) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % include_hov2_true)
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), include_hov2_true);
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "HOVExpress2");
@@ -245,11 +242,8 @@ TEST_F(HOV2Test, hov2_true_uses_hov2) {
 
 //------------------------------------------------------------------
 TEST_F(HOV2Test, hot_true_avoids_hov2) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % include_hot_true)
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), include_hot_true);
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "RT 36");
@@ -257,11 +251,8 @@ TEST_F(HOV2Test, hot_true_avoids_hov2) {
 
 //------------------------------------------------------------------
 TEST_F(HOV2Test, hov3_true_uses_hov2) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % include_hov3_true)
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), include_hov3_true);
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "HOVExpress2");
@@ -277,11 +268,8 @@ TEST_F(HOV2Test, hov_costing_uses_auto_hov2) {
     }
   };
 
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % "")
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), "");
   replace_all(req, "auto", "hov");
   auto result = gurka::do_action(Options::route, map, req, reader);
 
@@ -322,11 +310,8 @@ gurka::map HOV3Test::map = {};
 
 //------------------------------------------------------------------
 TEST_F(HOV3Test, default_avoids_hov3) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % "")
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), "");
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "RT 36");
@@ -334,11 +319,8 @@ TEST_F(HOV3Test, default_avoids_hov3) {
 
 //------------------------------------------------------------------
 TEST_F(HOV3Test, hov2_true_avoids_hov3) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % include_hov2_true)
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), include_hov2_true);
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "RT 36");
@@ -346,11 +328,8 @@ TEST_F(HOV3Test, hov2_true_avoids_hov3) {
 
 //------------------------------------------------------------------
 TEST_F(HOV3Test, hot_true_avoids_hov3) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % include_hot_true)
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), include_hot_true);
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "RT 36");
@@ -358,11 +337,8 @@ TEST_F(HOV3Test, hot_true_avoids_hov3) {
 
 //------------------------------------------------------------------
 TEST_F(HOV3Test, hov3_true_uses_hov3) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % include_hov3_true)
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), include_hov3_true);
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "HOVExpress3");
@@ -403,11 +379,8 @@ gurka::map HOTTest::map = {};
 
 //------------------------------------------------------------------
 TEST_F(HOTTest, default_avoids_hot) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % "")
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), "");
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "RT 36");
@@ -415,11 +388,8 @@ TEST_F(HOTTest, default_avoids_hot) {
 
 //------------------------------------------------------------------
 TEST_F(HOTTest, hov2_true_avoids_hot3) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % include_hov2_true)
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), include_hov2_true);
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "RT 36");
@@ -427,11 +397,8 @@ TEST_F(HOTTest, hov2_true_avoids_hot3) {
 
 //------------------------------------------------------------------
 TEST_F(HOTTest, hov3_true_uses_hot3) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % include_hov3_true)
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), include_hov3_true);
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "HOTExpress3");
@@ -439,11 +406,8 @@ TEST_F(HOTTest, hov3_true_uses_hot3) {
 
 //------------------------------------------------------------------
 TEST_F(HOTTest, hot_true_uses_hot3) {
-  std::string req =
-      (boost::format(req_hov) % std::to_string(map.nodes.at("1").lat()) %
-       std::to_string(map.nodes.at("1").lng()) % std::to_string(map.nodes.at("2").lat()) %
-       std::to_string(map.nodes.at("2").lng()) % include_hot_true)
-          .str();
+  std::string req = std::format(req_hov, map.nodes.at("1").lat(), map.nodes.at("1").lng(),
+                                map.nodes.at("2").lat(), map.nodes.at("2").lng(), include_hot_true);
   auto result = gurka::do_action(Options::route, map, req, reader);
 
   EXPECT_EQ(result.directions().routes(0).legs(0).maneuver(0).street_name(0).value(), "HOTExpress3");
@@ -501,11 +465,8 @@ gurka::map HOVChoices::map = {};
 //------------------------------------------------------------------
 TEST_F(HOVChoices, choices) {
   {
-    std::string req =
-        (boost::format(req_hov) % std::to_string(map.nodes.at("D").lat()) %
-         std::to_string(map.nodes.at("D").lng()) % std::to_string(map.nodes.at("G").lat()) %
-         std::to_string(map.nodes.at("G").lng()) % "")
-            .str();
+    std::string req = std::format(req_hov, map.nodes.at("D").lat(), map.nodes.at("D").lng(),
+                                  map.nodes.at("G").lat(), map.nodes.at("G").lng(), "");
     auto result = gurka::do_action(Options::route, map, req, reader);
 
     // The hov lane is fastest, but router cannot choose it because
@@ -516,10 +477,8 @@ TEST_F(HOVChoices, choices) {
 
   {
     std::string req =
-        (boost::format(req_hov) % std::to_string(map.nodes.at("D").lat()) %
-         std::to_string(map.nodes.at("D").lng()) % std::to_string(map.nodes.at("G").lat()) %
-         std::to_string(map.nodes.at("G").lng()) % include_hov2_true)
-            .str();
+        std::format(req_hov, map.nodes.at("D").lat(), map.nodes.at("D").lng(),
+                    map.nodes.at("G").lat(), map.nodes.at("G").lng(), include_hov2_true);
     auto result = gurka::do_action(Options::route, map, req, reader);
 
     // The hov lane is fastest, but router cannot choose it because
@@ -529,11 +488,8 @@ TEST_F(HOVChoices, choices) {
   }
 
   {
-    std::string req =
-        (boost::format(req_hov) % std::to_string(map.nodes.at("D").lat()) %
-         std::to_string(map.nodes.at("D").lng()) % std::to_string(map.nodes.at("G").lat()) %
-         std::to_string(map.nodes.at("G").lng()) % include_hot_true)
-            .str();
+    std::string req = std::format(req_hov, map.nodes.at("D").lat(), map.nodes.at("D").lng(),
+                                  map.nodes.at("G").lat(), map.nodes.at("G").lng(), include_hot_true);
     auto result = gurka::do_action(Options::route, map, req, reader);
 
     // User allows hot-lanes and the router can choose the faster US 36 Express Lane.
@@ -547,10 +503,8 @@ TEST_F(HOVChoices, choices) {
 
   {
     std::string req =
-        (boost::format(req_hov) % std::to_string(map.nodes.at("D").lat()) %
-         std::to_string(map.nodes.at("D").lng()) % std::to_string(map.nodes.at("G").lat()) %
-         std::to_string(map.nodes.at("G").lng()) % include_hov3_true)
-            .str();
+        std::format(req_hov, map.nodes.at("D").lat(), map.nodes.at("D").lng(),
+                    map.nodes.at("G").lat(), map.nodes.at("G").lng(), include_hov3_true);
     auto result = gurka::do_action(Options::route, map, req, reader);
 
     // User allows hov3-lanes and the router can choose the faster US 36 Express Lane.

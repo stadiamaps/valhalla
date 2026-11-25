@@ -1,16 +1,12 @@
-#include "filesystem.h"
 #include "midgard/sequence.h"
-#include "mjolnir/osmnode.h"
+#include "mjolnir/osmway.h"
 #include "mjolnir/pbfgraphparser.h"
-#include <cstdint>
 
 #include <boost/property_tree/ptree.hpp>
-#include <fstream>
+#include <gtest/gtest.h>
 
-#include "baldr/directededge.h"
-#include "baldr/graphconstants.h"
-
-#include "test.h"
+#include <cstdint>
+#include <filesystem>
 
 #if !defined(VALHALLA_SOURCE_DIR)
 #define VALHALLA_SOURCE_DIR
@@ -30,17 +26,6 @@ std::string to_restriction_file = "test_to_complex_restrictions_utrecht.bin";
 std::string bss_file = "test_bss_nodes_utrecht.bin";
 std::string linguistic_node_file = "test_linguistic_node_utrecht.bin";
 
-const auto node_predicate = [](const OSMWayNode& a, const OSMWayNode& b) {
-  return a.node.osmid_ < b.node.osmid_;
-};
-
-OSMNode GetNode(uint64_t node_id, sequence<OSMWayNode>& way_nodes) {
-  auto found = way_nodes.find({node_id}, node_predicate);
-  if (found == way_nodes.end())
-    throw std::runtime_error("Couldn't find node: " + std::to_string(node_id));
-  return (*found).node;
-}
-
 auto way_predicate = [](const OSMWay& a, const OSMWay& b) { return a.osmwayid_ < b.osmwayid_; };
 
 OSMWay GetWay(uint32_t way_id, sequence<OSMWay>& ways) {
@@ -56,7 +41,7 @@ TEST(Utrecth, TestBike) {
   conf.put<unsigned long>("mjolnir.id_table_size", 1000);
 
   sequence<OSMWay> ways(ways_file, false);
-  ways.sort(way_predicate);
+  ways.sort(way_predicate, 2);
 
   auto way_127361688 = GetWay(127361688, ways);
   EXPECT_TRUE(way_127361688.auto_forward());
@@ -195,7 +180,7 @@ TEST(Utrecht, TestBus) {
   conf.put<unsigned long>("mjolnir.id_table_size", 1000);
 
   sequence<OSMWay> ways(ways_file, false);
-  ways.sort(way_predicate);
+  ways.sort(way_predicate, 2);
 
   auto way_33648196 = GetWay(33648196, ways);
   EXPECT_TRUE(way_33648196.auto_forward());
@@ -233,13 +218,13 @@ public:
   }
 
   void TearDown() override {
-    filesystem::remove(ways_file);
-    filesystem::remove(way_nodes_file);
-    filesystem::remove(access_file);
-    filesystem::remove(from_restriction_file);
-    filesystem::remove(to_restriction_file);
-    filesystem::remove(bss_file);
-    filesystem::remove(linguistic_node_file);
+    std::filesystem::remove(ways_file);
+    std::filesystem::remove(way_nodes_file);
+    std::filesystem::remove(access_file);
+    std::filesystem::remove(from_restriction_file);
+    std::filesystem::remove(to_restriction_file);
+    std::filesystem::remove(bss_file);
+    std::filesystem::remove(linguistic_node_file);
   }
 };
 

@@ -1,9 +1,13 @@
 file(GLOB headers ${VALHALLA_SOURCE_DIR}/valhalla/sif/*.h)
 
+# Disable unity build for sif because each cost model defines many constants with similar names.
+if(CMAKE_UNITY_BUILD)
+  set(CMAKE_UNITY_BUILD OFF)
+endif()
+
 set(sources
   autocost.cc
   bicyclecost.cc
-  hierarchylimits.cc
   motorcyclecost.cc
   motorscootercost.cc
   nocost.cc
@@ -12,13 +16,13 @@ set(sources
   truckcost.cc
   dynamiccost.cc
   recost.cc
-        lowspeedvehiclecost.cc)
+  lowspeedvehiclecost.cc)
 
 set(system_includes
   ${date_include_dir}
   $<$<BOOL:${WIN32}>:${dirent_include_dir}>
   ${rapidjson_include_dir})
-  
+
 valhalla_module(NAME sif
   SOURCES ${sources}
   HEADERS ${headers}

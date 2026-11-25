@@ -1,15 +1,16 @@
 #ifndef VALHALLA_BALDR_GRAPHTILEHEADER_H_
 #define VALHALLA_BALDR_GRAPHTILEHEADER_H_
 
-#include <array>
-#include <cstdint>
-#include <cstdlib>
-#include <string>
-
+#include <valhalla/baldr/graphconstants.h>
 #include <valhalla/baldr/graphid.h>
 #include <valhalla/baldr/tilehierarchy.h>
 #include <valhalla/midgard/logging.h>
 #include <valhalla/midgard/pointll.h>
+
+#include <array>
+#include <cstdint>
+#include <cstdlib>
+#include <string>
 
 namespace valhalla {
 namespace baldr {
@@ -18,7 +19,7 @@ namespace baldr {
 // something to the tile simply subtract one from this number and add it
 // just before the empty_slots_ array below. NOTE that it can ONLY be an
 // offset in bytes and NOT a bitfield or union or anything of that sort
-constexpr size_t kEmptySlots = 11;
+constexpr size_t kEmptySlots = 10;
 
 // Maximum size of the version string (stored as a fixed size
 // character array so the GraphTileHeader size remains fixed).
@@ -165,13 +166,7 @@ public:
    * @return Returns the base lat,lon of the tile (degrees).
    */
   midgard::PointLL base_ll() const {
-    GraphId id(graphid_);
-
-    if (id.level() == TileHierarchy::GetTransitLevel().level) {
-      return TileHierarchy::GetTransitLevel().tiles.Base(id.tileid());
-    }
-    return TileHierarchy::levels()[id.level()].tiles.Base(id.tileid());
-    // return midgard::PointLL(base_ll_.first, base_ll_.second);
+    return {base_ll_[0], base_ll_[1]};
   }
 
   /**
@@ -179,8 +174,8 @@ public:
    * @param ll  Base lat,lon of the tile.
    */
   void set_base_ll(const midgard::PointLL& ll) {
-    base_ll_.first = ll.lng();
-    base_ll_.second = ll.lat();
+    base_ll_[0] = ll.lng();
+    base_ll_[1] = ll.lat();
   }
 
   /**
@@ -252,6 +247,17 @@ public:
       LOG_ERROR("Tile exceeded maximum directededge count: " + std::to_string(count));
     }
     directededgecount_ = count;
+  }
+
+  /**
+   * Checks for the presence of bounding circles.
+   *
+   * @return false if the bounding circle offset is
+   * either 0 or equal to the overall tile size (during early Valhalla 3.x versions, unused offset
+   * slots were set to tile_size), else true.
+   */
+  bool has_bounding_circles() const {
+    return boundingcircles_offset_ != 0 && boundingcircles_offset_ != tile_size_;
   }
 
   /**
@@ -590,20 +596,61 @@ public:
     tile_size_ = offset;
   }
 
+  /**
+   * Get the offset to the start of the bounding circles
+   * @return the byte offset to the start of the bounding circles
+   */
+  uint32_t bounding_circle_offset() const {
+    return boundingcircles_offset_ == tile_size_ ? 0 : boundingcircles_offset_;
+  }
+
+  /**
+   * Sets the offset to the start of the bounding circles
+   * @param offset the offset in bytes to the beginning of the bounding circles
+   */
+  void set_bounding_circle_offset(uint32_t offset) {
+    boundingcircles_offset_ = offset;
+  }
+
+  /**
+   * Get the per-tile data hash, the low bits of checksum_. Unique per tile but reproducible across
+   * builds of the same data.
+   * @return the 48-bit hash of the tile's data
+   */
+  uint64_t tile_checksum() const {
+    return checksum_ & ((uint64_t(1) << kTileHashBits) - 1);
+  }
+
+  /**
+   * Sets the raw checksum_ field:
+   * build id packed in the high bits, per-tile data hash in the low bits.
+   * @param checksum the 64bit value for the tile's checksum_
+   */
+  void set_raw_checksum(uint64_t checksum) {
+    checksum_ = checksum;
+  }
+
+  /**
+   * Returns the tileset build id packed into the high bits of checksum_.
+   * It stays the same across every tile of a build.
+   */
+  uint16_t build_id() const {
+    return static_cast<uint16_t>(checksum_ >> kTileHashBits);
+  }
+
 protected:
-  // TODO when c++20 bitfields can be initialized here
   // GraphId (tileid and level) of this tile. Data quality metrics.
-  uint64_t graphid_ : 46;
-  uint64_t density_ : 4;
-  uint64_t name_quality_ : 4;
-  uint64_t speed_quality_ : 4;
-  uint64_t exit_quality_ : 4;
-  uint64_t has_elevation_ : 1;        // Does this tile have elevation data
-  uint64_t has_ext_directededge_ : 1; // Does this tile have extended directed edge data
+  uint64_t graphid_ : 46 = 0;
+  uint64_t density_ : 4 = 0;
+  uint64_t name_quality_ : 4 = 0;
+  uint64_t speed_quality_ : 4 = 0;
+  uint64_t exit_quality_ : 4 = 0;
+  uint64_t has_elevation_ : 1 = 0;        // Does this tile have elevation data
+  uint64_t has_ext_directededge_ : 1 = 0; // Does this tile have extended directed edge data
 
   // TODO: in v4, don't store this its superfluous information, the graphid has all we need
   // Base lon, lat of the tile
-  std::pair<float, float> base_ll_ = {0, 0};
+  std::array<float, 2> base_ll_ = {0.f, 0.f};
 
   // baldr version.
   std::array<char, kMaxVersionSize> version_ = {};
@@ -613,33 +660,33 @@ protected:
 
   // Record counts (for fixed size records). Node and directed edge have a max of
   // kMaxGraphId which is 21 bits.
-  uint64_t nodecount_ : 21;             // Number of nodes
-  uint64_t directededgecount_ : 21;     // Number of directed edges
-  uint64_t predictedspeeds_count_ : 21; // Number of predictive speed records
-  uint64_t spare1_ : 1;
+  uint64_t nodecount_ : 21 = 0;             // Number of nodes
+  uint64_t directededgecount_ : 21 = 0;     // Number of directed edges
+  uint64_t predictedspeeds_count_ : 21 = 0; // Number of predictive speed records
+  uint64_t spare1_ : 1 = 0;
 
   // Currently there can only be twice as many transitions as there are nodes,
   // but in practice the number should be much less.
-  uint32_t transitioncount_ : 22; // Number of node transitions
-  uint32_t spare3_ : 10;          // TODO: DELETE ME IN V4
-  uint32_t turnlane_count_ : 21;  // Number of turnlane records
-  uint32_t spare4_ : 11;          // TODO: DELETE ME IN V4
-  uint64_t transfercount_ : 16;   // Number of transit transfer records
-  uint64_t spare2_ : 7;
+  uint32_t transitioncount_ : 22 = 0; // Number of node transitions
+  uint32_t spare3_ : 10 = 0;          // TODO: DELETE ME IN V4
+  uint32_t turnlane_count_ : 21 = 0;  // Number of turnlane records
+  uint32_t spare4_ : 11 = 0;          // TODO: DELETE ME IN V4
+  uint64_t transfercount_ : 16 = 0;   // Number of transit transfer records
+  uint64_t spare2_ : 7 = 0;
 
   // Number of transit records
-  uint64_t departurecount_ : 24;
-  uint64_t stopcount_ : 16;
-  uint64_t spare5_ : 1; // TODO: DELETE ME IN V4
-  uint64_t routecount_ : 12;
-  uint64_t schedulecount_ : 12;
+  uint64_t departurecount_ : 24 = 0;
+  uint64_t stopcount_ : 16 = 0;
+  uint64_t spare5_ : 1 = 0; // TODO: DELETE ME IN V4
+  uint64_t routecount_ : 12 = 0;
+  uint64_t schedulecount_ : 12 = 0;
 
   // Counts
-  uint64_t signcount_ : 24;                // Number of signs
-  uint64_t spare6_ : 16;                   // TODO: DELETE ME IN V4
-  uint64_t access_restriction_count_ : 24; // Number of access restriction records
-  uint64_t admincount_ : 16;               // Number of admin records
-  uint64_t spare7_ : 24;                   // TODO: DELETE ME IN V4
+  uint64_t signcount_ : 24 = 0;                // Number of signs
+  uint64_t spare6_ : 16 = 0;                   // TODO: DELETE ME IN V4
+  uint64_t access_restriction_count_ : 24 = 0; // Number of access restriction records
+  uint64_t admincount_ : 16 = 0;               // Number of admin records
+  uint64_t spare7_ : 24 = 0;                   // TODO: DELETE ME IN V4
 
   // Note all of the comments about deleting spare in v4
   // There are typos in the bitfield containing spare2_ above
@@ -666,7 +713,10 @@ protected:
   // this should be backwards compatible. Make sure use of bits from spareword* does not
   // exceed 128 bits.
   uint64_t spareword0_ = 0;
-  uint64_t spareword1_ = 0;
+
+  // for road tiles: hashed md5 of the OSM PBFs
+  // for transit tiles: so far the same
+  uint64_t checksum_ = 0; // formerly spareword1_
 
   // Offsets to beginning of data (for variable size records)
   uint32_t complex_restriction_forward_offset_ = 0; // Offset to complex restriction list
@@ -689,6 +739,9 @@ protected:
   // GraphTile data size in bytes
   uint32_t tile_size_ = 0;
 
+  // Offset to the start of the bounding circles; 0 means no bounding circles are present
+  uint32_t boundingcircles_offset_ = 0;
+
   // Marks the end of this version of the tile with the rest of the slots
   // being available for growth. If you want to use one of the empty slots,
   // simply add a uint32_t some_offset_; just above empty_slots_ and decrease
@@ -696,6 +749,13 @@ protected:
   // bitfield or union or anything like that
   std::array<uint32_t, kEmptySlots> empty_slots_ = {};
 };
+
+static_assert(sizeof(GraphTileHeader) == 272, "Bad sizeof(GraphTileHeader)");
+// make sure it stays POD-like so we can safely copy its bytes around
+static_assert(std::is_trivially_copyable_v<GraphTileHeader>,
+              "GraphTileHeader is not trivially copyable");
+static_assert(std::is_standard_layout_v<GraphTileHeader>,
+              "GraphTileHeader has non-standard layout, e.g. virtual functions");
 
 } // namespace baldr
 } // namespace valhalla

@@ -1,23 +1,21 @@
 #ifndef VALHALLA_MJOLNIR_GRAPHBUILDER_H
 #define VALHALLA_MJOLNIR_GRAPHBUILDER_H
 
-#include <boost/property_tree/ptree.hpp>
-#include <cstdint>
-#include <string>
-#include <vector>
-
 #include <valhalla/baldr/signinfo.h>
 #include <valhalla/midgard/sequence.h>
-
 #include <valhalla/mjolnir/osmdata.h>
 #include <valhalla/mjolnir/osmnode.h>
 #include <valhalla/mjolnir/osmnodelinguistic.h>
 #include <valhalla/mjolnir/osmway.h>
 
+#include <boost/property_tree/ptree_fwd.hpp>
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
 namespace valhalla {
 namespace mjolnir {
-
-using boost::property_tree::ptree;
 
 /**
  * Class used to construct temporary data used to build the initial graph.
@@ -47,12 +45,14 @@ public:
                     const std::string& way_nodes_file,
                     const std::string& nodes_file,
                     const std::string& edges_file,
+                    const std::string& edge_shapes_file,
+                    const std::string& edge_node_ids_file,
                     const std::string& complex_from_restriction_file,
                     const std::string& complex_to_restriction_file,
                     const std::string& linguistic_node_file,
                     const std::map<baldr::GraphId, size_t>& tiles);
 
-  static std::map<baldr::GraphId, size_t> BuildEdges(const ptree& conf,
+  static std::map<baldr::GraphId, size_t> BuildEdges(const boost::property_tree::ptree& conf,
                                                      const std::string& ways_file,
                                                      const std::string& way_nodes_file,
                                                      const std::string& nodes_file,

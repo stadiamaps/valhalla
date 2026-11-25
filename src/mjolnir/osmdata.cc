@@ -1,16 +1,17 @@
+#include "mjolnir/osmdata.h"
+#include "midgard/logging.h"
+#include "scoped_timer.h"
+
+#include <boost/algorithm/string/case_conv.hpp>
+
 #include <cctype>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
-#include <iostream>
-
-#include <boost/algorithm/string.hpp>
-
-#include "filesystem.h"
-#include "midgard/logging.h"
-#include "mjolnir/osmdata.h"
-#include "mjolnir/util.h"
+#include <sstream>
 
 using namespace valhalla::mjolnir;
+using valhalla::baldr::ConditionalSpeedLimit;
 
 namespace {
 
@@ -20,6 +21,7 @@ const std::string restrictions_file = "osmdata_restrictions.bin";
 const std::string viaset_file = "osmdata_viaset.bin";
 const std::string access_restrictions_file = "osmdata_access_restrictions.bin";
 const std::string bike_relations_file = "osmdata_bike_relations.bin";
+const std::string area_relations_file = "osmdata_area_relations.bin";
 const std::string way_ref_file = "osmdata_way_refs.bin";
 const std::string way_ref_rev_file = "osmdata_way_refs_rev.bin";
 const std::string node_names_file = "osmdata_node_names.bin";
@@ -27,6 +29,7 @@ const std::string unique_names_file = "osmdata_unique_strings.bin";
 const std::string lane_connectivity_file = "osmdata_lane_connectivity.bin";
 const std::string pronunciation_file = "osmdata_pronunciation_file.bin";
 const std::string language_file = "osmdata_language_file.bin";
+const std::string conditional_speed_limit_file = "osmdata_conditional_speed_limit_file.bin";
 
 // Data structures to assist writing and reading data
 struct TempRestriction {
@@ -53,6 +56,15 @@ struct BikeRelation {
   BikeRelation() : way_id(0), relation(OSMBike()) {
   }
   BikeRelation(const uint64_t w, const OSMBike& r) : way_id(w), relation(r) {
+  }
+};
+
+struct AreaRelation {
+  uint64_t relation_id;
+  OSMAreaMember area_member;
+  AreaRelation() : relation_id(0), area_member(OSMAreaMember()) {
+  }
+  AreaRelation(uint64_t r, const OSMAreaMember& m) : relation_id(r), area_member(m) {
   }
 };
 
@@ -172,6 +184,29 @@ bool write_bike_relations(const std::string& filename, const BikeMultiMap& bike_
   file.write(reinterpret_cast<const char*>(&sz), sizeof(uint32_t));
   file.write(reinterpret_cast<const char*>(relations.data()),
              relations.size() * sizeof(BikeRelation));
+  file.close();
+  return true;
+}
+
+bool write_area_relations(const std::string& filename, const AreaMultiMap& area_relations) {
+
+  std::ofstream file(filename.c_str(), std::ios::out | std::ios::binary | std::ios::trunc);
+  if (!file.is_open()) {
+    LOG_ERROR("write_area_relations failed to open output file: " + filename);
+    return false;
+  }
+
+  // Create a vector of area relations from the multimap
+  std::vector<AreaRelation> relations;
+  for (auto it = area_relations.cbegin(); it != area_relations.cend(); ++it) {
+    relations.emplace_back(it->first, it->second);
+  }
+
+  // Write the count and then the area relations
+  uint32_t sz = relations.size();
+  file.write(reinterpret_cast<const char*>(&sz), sizeof(uint32_t));
+  file.write(reinterpret_cast<const char*>(relations.data()),
+             relations.size() * sizeof(AreaRelation));
   file.close();
   return true;
 }
@@ -309,6 +344,24 @@ bool write_linguistic(const std::string& filename, const LinguisticMultiMap& lin
   return true;
 }
 
+bool write_conditional_speed_limits(const std::string& filename,
+                                    const ConditionalSpeedLimitsMultiMap& speed_map) {
+  // Open file and truncate
+  std::ofstream file(filename.c_str(), std::ios::out | std::ios::binary | std::ios::trunc);
+  if (!file.is_open()) {
+    LOG_ERROR("write_linguistic failed to open output file: " + filename);
+    return false;
+  }
+
+  uint32_t sz = speed_map.size();
+  file.write(reinterpret_cast<const char*>(&sz), sizeof(uint32_t));
+  for (const std::pair<const uint64_t, ConditionalSpeedLimit>& sp : speed_map) {
+    file.write(reinterpret_cast<const char*>(&sp), sizeof(sp));
+  }
+  file.close();
+  return true;
+}
+
 bool read_restrictions(const std::string& filename, RestrictionsMultiMap& res_map) {
   // Open file and truncate
   std::ifstream file(filename, std::ios::in | std::ios::binary);
@@ -393,6 +446,28 @@ bool read_bike_relations(const std::string& filename, BikeMultiMap& bike_relatio
   // Iterate through the temporary bike relations list and add to the bike relations multi-map
   for (const auto& r : rel) {
     bike_relations.insert({r.way_id, r.relation});
+  }
+  return true;
+}
+
+bool read_area_relations(const std::string& filename, AreaMultiMap& area_relations) {
+
+  std::ifstream file(filename, std::ios::in | std::ios::binary);
+  if (!file.is_open()) {
+    LOG_ERROR("read_area_relations failed to open input file: " + filename);
+    return false;
+  }
+
+  // Read the count and then the area relations list
+  uint32_t count = 0;
+  file.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
+  std::vector<AreaRelation> rel(count);
+  file.read(reinterpret_cast<char*>(rel.data()), count * sizeof(AreaRelation));
+  file.close();
+
+  // Iterate through the temporary area relations list and add to the area relations multi-map
+  for (const auto& r : rel) {
+    area_relations.insert({r.relation_id, r.area_member});
   }
   return true;
 }
@@ -526,6 +601,28 @@ bool read_linguistic(const std::string& filename, LinguisticMultiMap& ling_map) 
   return true;
 }
 
+bool read_conditional_speed_limits(const std::string& filename,
+                                   ConditionalSpeedLimitsMultiMap& speed_map) {
+  // Open file and truncate
+  std::ifstream file(filename, std::ios::in | std::ios::binary);
+  if (!file.is_open()) {
+    LOG_ERROR("read_conditional_speed_limits failed to open input file: " + filename);
+    return false;
+  }
+
+  // Read the count and following conditional speed limits
+  uint32_t count = 0;
+  file.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
+  speed_map.reserve(count);
+  while (count--) {
+    std::pair<uint64_t, ConditionalSpeedLimit> sp = {{}, {}};
+    file.read(reinterpret_cast<char*>(&sp), sizeof(sp));
+    speed_map.emplace(std::move(sp));
+  }
+  file.close();
+  return true;
+}
+
 } // namespace
 
 namespace valhalla {
@@ -542,6 +639,7 @@ bool OSMData::write_to_temp_files(const std::string& tile_dir) {
     LOG_ERROR("Failed to open output file: " + countfile);
     return false;
   }
+  SCOPED_TIMER();
   file.write(reinterpret_cast<const char*>(&max_changeset_id_), sizeof(uint64_t));
   file.write(reinterpret_cast<const char*>(&osm_node_count), sizeof(uint64_t));
   file.write(reinterpret_cast<const char*>(&osm_way_count), sizeof(uint64_t));
@@ -552,20 +650,25 @@ bool OSMData::write_to_temp_files(const std::string& tile_dir) {
   file.write(reinterpret_cast<const char*>(&node_name_count), sizeof(uint64_t));
   file.write(reinterpret_cast<const char*>(&node_exit_to_count), sizeof(uint64_t));
   file.write(reinterpret_cast<const char*>(&node_linguistic_count), sizeof(uint64_t));
+  file.write(reinterpret_cast<const char*>(&max_way_id), sizeof(uint64_t));
+  file.write(reinterpret_cast<const char*>(&max_node_id), sizeof(uint64_t));
   file.close();
 
   // Write the rest of OSMData
-  bool status = write_restrictions(tile_dir + restrictions_file, restrictions) &&
-                write_viaset(tile_dir + viaset_file, via_set) &&
-                write_access_restrictions(tile_dir + access_restrictions_file, access_restrictions) &&
-                write_bike_relations(tile_dir + bike_relations_file, bike_relations) &&
-                write_way_refs(tile_dir + way_ref_file, way_ref) &&
-                write_way_refs(tile_dir + way_ref_rev_file, way_ref_rev) &&
-                write_node_names(tile_dir + node_names_file, node_names) &&
-                write_unique_names(tile_dir + unique_names_file, name_offset_map) &&
-                write_lane_connectivity(tile_dir + lane_connectivity_file, lane_connectivity_map) &&
-                write_linguistic(tile_dir + pronunciation_file, pronunciations) &&
-                write_linguistic(tile_dir + language_file, langs);
+  bool status =
+      write_restrictions(tile_dir + restrictions_file, restrictions) &&
+      write_viaset(tile_dir + viaset_file, via_set) &&
+      write_access_restrictions(tile_dir + access_restrictions_file, access_restrictions) &&
+      write_bike_relations(tile_dir + bike_relations_file, bike_relations) &&
+      write_area_relations(tile_dir + area_relations_file, area_relations) &&
+      write_way_refs(tile_dir + way_ref_file, way_ref) &&
+      write_way_refs(tile_dir + way_ref_rev_file, way_ref_rev) &&
+      write_node_names(tile_dir + node_names_file, node_names) &&
+      write_unique_names(tile_dir + unique_names_file, name_offset_map) &&
+      write_lane_connectivity(tile_dir + lane_connectivity_file, lane_connectivity_map) &&
+      write_linguistic(tile_dir + pronunciation_file, pronunciations) &&
+      write_linguistic(tile_dir + language_file, langs) &&
+      write_conditional_speed_limits(tile_dir + conditional_speed_limit_file, conditional_speeds);
   LOG_INFO("Done");
   return status;
 }
@@ -575,8 +678,8 @@ bool OSMData::read_from_temp_files(const std::string& tile_dir) {
   LOG_INFO("Read OSMData from temp files");
 
   std::string tile_directory = tile_dir;
-  if (tile_directory.back() != filesystem::path::preferred_separator) {
-    tile_directory.push_back(filesystem::path::preferred_separator);
+  if (tile_directory.back() != std::filesystem::path::preferred_separator) {
+    tile_directory.push_back(std::filesystem::path::preferred_separator);
   }
 
   // Open the count file
@@ -586,6 +689,7 @@ bool OSMData::read_from_temp_files(const std::string& tile_dir) {
     LOG_ERROR("Failed to open input file: " + countfile);
     return false;
   }
+  SCOPED_TIMER();
   file.read(reinterpret_cast<char*>(&max_changeset_id_), sizeof(uint64_t));
   file.read(reinterpret_cast<char*>(&osm_node_count), sizeof(uint64_t));
   file.read(reinterpret_cast<char*>(&osm_way_count), sizeof(uint64_t));
@@ -596,6 +700,8 @@ bool OSMData::read_from_temp_files(const std::string& tile_dir) {
   file.read(reinterpret_cast<char*>(&node_name_count), sizeof(uint64_t));
   file.read(reinterpret_cast<char*>(&node_exit_to_count), sizeof(uint64_t));
   file.read(reinterpret_cast<char*>(&node_linguistic_count), sizeof(uint64_t));
+  file.read(reinterpret_cast<char*>(&max_way_id), sizeof(uint64_t));
+  file.read(reinterpret_cast<char*>(&max_node_id), sizeof(uint64_t));
   file.close();
 
   // Read the other data
@@ -604,13 +710,16 @@ bool OSMData::read_from_temp_files(const std::string& tile_dir) {
       read_viaset(tile_directory + viaset_file, via_set) &&
       read_access_restrictions(tile_directory + access_restrictions_file, access_restrictions) &&
       read_bike_relations(tile_directory + bike_relations_file, bike_relations) &&
+      read_area_relations(tile_directory + area_relations_file, area_relations) &&
       read_way_refs(tile_directory + way_ref_file, way_ref) &&
       read_way_refs(tile_directory + way_ref_rev_file, way_ref_rev) &&
       read_node_names(tile_directory + node_names_file, node_names) &&
       read_unique_names(tile_directory + unique_names_file, name_offset_map) &&
       read_lane_connectivity(tile_directory + lane_connectivity_file, lane_connectivity_map) &&
       read_linguistic(tile_directory + pronunciation_file, pronunciations) &&
-      read_linguistic(tile_directory + language_file, langs);
+      read_linguistic(tile_directory + language_file, langs) &&
+      read_conditional_speed_limits(tile_directory + conditional_speed_limit_file,
+                                    conditional_speeds);
   LOG_INFO("Done");
   initialized = status;
   return status;
@@ -618,6 +727,7 @@ bool OSMData::read_from_temp_files(const std::string& tile_dir) {
 
 // Read OSMData from temporary files
 bool OSMData::read_from_unique_names_file(const std::string& tile_dir) {
+  SCOPED_TIMER();
   LOG_INFO("Read OSMData unique_names from temp file");
 
   // Read the other data
@@ -637,8 +747,8 @@ void OSMData::add_to_name_map(const uint64_t member_id,
   dir[0] = std::toupper(dir[0]);
 
   // TODO:  network=e-road with int_ref=E #
-  if ((boost::starts_with(dir, "North (") || boost::starts_with(dir, "South (") ||
-       boost::starts_with(dir, "East (") || boost::starts_with(dir, "West (")) ||
+  if ((dir.starts_with("North (") || dir.starts_with("South (") || dir.starts_with("East (") ||
+       dir.starts_with("West (")) ||
       dir == "North" || dir == "South" || dir == "East" || dir == "West") {
 
     if (forward) {
@@ -662,9 +772,10 @@ void OSMData::add_to_name_map(const uint64_t member_id,
 }
 
 void OSMData::cleanup_temp_files(const std::string& tile_dir) {
+  SCOPED_TIMER();
   auto remove_temp_file = [](const std::string& fname) {
-    if (filesystem::exists(fname)) {
-      filesystem::remove(fname);
+    if (std::filesystem::exists(fname)) {
+      std::filesystem::remove(fname);
     }
   };
 
@@ -673,6 +784,7 @@ void OSMData::cleanup_temp_files(const std::string& tile_dir) {
   remove_temp_file(tile_dir + viaset_file);
   remove_temp_file(tile_dir + access_restrictions_file);
   remove_temp_file(tile_dir + bike_relations_file);
+  remove_temp_file(tile_dir + area_relations_file);
   remove_temp_file(tile_dir + way_ref_file);
   remove_temp_file(tile_dir + way_ref_rev_file);
   remove_temp_file(tile_dir + node_names_file);
@@ -680,6 +792,7 @@ void OSMData::cleanup_temp_files(const std::string& tile_dir) {
   remove_temp_file(tile_dir + lane_connectivity_file);
   remove_temp_file(tile_dir + pronunciation_file);
   remove_temp_file(tile_dir + language_file);
+  remove_temp_file(tile_dir + conditional_speed_limit_file);
 }
 
 } // namespace mjolnir
